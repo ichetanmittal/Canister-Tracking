@@ -38,6 +38,61 @@
             border-radius: 4px;
             display: none;
         }
+        .form-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+        }
+
+        input, textarea {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        textarea {
+            min-height: 100px;
+        }
+
+        button[type="submit"] {
+            padding: 10px;
+            background-color: #0070f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button[type="submit"]:hover {
+            background-color: #0051c3;
+        }
+
+        .canister-list {
+            margin-top: 20px;
+        }
+
+        .canister-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+
+        .canister-card h5 {
+            margin: 0 0 10px 0;
+        }
+
+        .canister-card p {
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
@@ -46,8 +101,30 @@
         <div id="auth-section">
             <button id="loginButton">Login with Internet Identity</button>
         </div>
-        <div id="user-section" class="user-info">
-            <h2>Welcome!</h2>
+        <div id="user-section" style="display: none;">
+            <h2>Welcome <span id="username"></span>!</h2>
+            
+            <!-- Canister Management Section -->
+            <div id="canister-section">
+                <h3>Manage Your Canisters</h3>
+                
+                <!-- Register New Canister Form -->
+                <div class="form-section">
+                    <h4>Register New Canister</h4>
+                    <form id="register-canister-form">
+                        <input type="text" id="canister-id" placeholder="Canister ID" required>
+                        <input type="text" id="canister-name" placeholder="Name" required>
+                        <textarea id="canister-description" placeholder="Description" required></textarea>
+                        <button type="submit">Register Canister</button>
+                    </form>
+                </div>
+
+                <!-- List of User's Canisters -->
+                <div class="canister-list">
+                    <h4>Your Canisters</h4>
+                    <div id="canisters-container"></div>
+                </div>
+            </div>
             <p>Principal ID: <span id="principalId"></span></p>
             <button id="logoutButton">Logout</button>
         </div>

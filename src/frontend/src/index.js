@@ -1,5 +1,6 @@
 import { AuthClient } from "@dfinity/auth-client";
 import { Actor, HttpAgent } from "@dfinity/agent";
+import { Principal } from "@dfinity/principal";
 import { idlFactory } from "../../declarations/canister-tracking-platform-backend/canister-tracking-platform-backend.did.js";
 
 let authClient;
@@ -55,29 +56,111 @@ async function handleAuthenticated() {
         await agent.fetchRootKey();
     }
 
-    // Create actor with the canister ID and interface factory
+    // Create actor with the new identity
     actor = Actor.createActor(idlFactory, {
         agent,
         canisterId: canisterId,
     });
 
-    // Get the user's principal ID
-    const principal = identity.getPrincipal().toString();
-    document.getElementById("principalId").textContent = principal;
+    // Display user's principal ID
+    const principal = identity.getPrincipal();
+    document.getElementById("principalId").textContent = principal.toString();
 
-    // Try to register the user if not already registered
+    // Load and display user's canisters
+    await loadUserCanisters();
+
+    // Set up canister registration form handler
+    const registerForm = document.getElementById("register-canister-form");
+    registerForm.onsubmit = async (e) => {
+        e.preventDefault();
+        await registerCanister();
+    };
+}
+
+async function loadUserCanisters() {
     try {
-        const result = await actor.registerUser(principal);
-        if (result.err) {
-            if (result.err !== "AlreadyExists") {
-                console.error("Failed to register user:", result.err);
-            }
+        const result = await actor.listUserCanisters();
+        if (result.ok) {
+            displayCanisters(result.ok);
+        } else {
+            console.error("Failed to load canisters:", result.err);
         }
-    } catch (e) {
-        console.error("Error registering user:", e);
+    } catch (error) {
+        console.error("Error loading canisters:", error);
+    }
+}
+
+function displayCanisters(canisters) {
+    const container = document.getElementById("canisters-container");
+    container.innerHTML = ""; // Clear existing content
+
+    if (canisters.length === 0) {
+        container.innerHTML = "<p>No canisters registered yet.</p>";
+        return;
     }
 
-    updateUI(true);
+    canisters.forEach(([canisterId, info]) => {
+        const card = document.createElement("div");
+        card.className = "canister-card";
+        
+        const createdDate = new Date(Number(info.createdAt) / 1000000); // Convert nanoseconds to milliseconds
+        
+        card.innerHTML = `
+            <h5>${info.name}</h5>
+            <p><strong>ID:</strong> ${canisterId.toString()}</p>
+            <p><strong>Description:</strong> ${info.description}</p>
+            <p><strong>Created:</strong> ${createdDate.toLocaleDateString()}</p>
+            <button onclick="editCanister('${canisterId}', '${info.name}', '${info.description}')">Edit</button>
+        `;
+        
+        container.appendChild(card);
+    });
+}
+
+async function registerCanister() {
+    const canisterId = document.getElementById("canister-id").value;
+    const name = document.getElementById("canister-name").value;
+    const description = document.getElementById("canister-description").value;
+
+    try {
+        // Create a Principal from the canister ID string
+        const canisterPrincipal = Principal.fromText(canisterId);
+        const result = await actor.registerCanister(canisterPrincipal, name, description);
+        
+        if (result.ok) {
+            alert("Canister registered successfully!");
+            await loadUserCanisters(); // Refresh the list
+            // Clear the form
+            document.getElementById("register-canister-form").reset();
+        } else {
+            alert("Failed to register canister: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error("Error registering canister:", error);
+        alert("Error registering canister: " + error.message);
+    }
+}
+
+async function editCanister(canisterId, currentName, currentDescription) {
+    const newName = prompt("Enter new name:", currentName);
+    if (!newName) return;
+
+    const newDescription = prompt("Enter new description:", currentDescription);
+    if (!newDescription) return;
+
+    try {
+        const principal = Principal.fromText(canisterId);
+        const result = await actor.updateCanisterInfo(principal, newName, newDescription);
+        
+        if (result.ok) {
+            alert("Canister updated successfully!");
+            await loadUserCanisters(); // Refresh the list
+        } else {
+            alert("Failed to update canister: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        alert("Error updating canister: " + error.message);
+    }
 }
 
 async function logout() {
