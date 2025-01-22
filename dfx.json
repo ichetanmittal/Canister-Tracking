@@ -1,0 +1,16 @@
+{
+  "canisters": {
+    "canister-tracking-platform-backend": {
+      "main": "src/canister-tracking-platform-backend/main.mo",
+      "type": "motoko"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
