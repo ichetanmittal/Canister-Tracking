@@ -3,12 +3,44 @@
     "canister-tracking-platform-backend": {
       "main": "src/canister-tracking-platform-backend/main.mo",
       "type": "motoko"
+    },
+    "internet_identity": {
+      "type": "custom",
+      "candid": "https://github.com/dfinity/internet-identity/releases/download/release-2024-12-13/internet_identity.did",
+      "wasm": "https://github.com/dfinity/internet-identity/releases/download/release-2024-12-13/internet_identity_dev.wasm.gz",
+      "init_arg": "(opt record { captcha_config = opt record { max_unsolved_captchas= 50:nat64; captcha_trigger = variant {Static = variant {CaptchaDisabled}}}})",
+      "remote": {
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      },
+      "frontend": {}
+    },
+    "frontend": {
+      "dependencies": [
+        "canister-tracking-platform-backend",
+        "internet_identity"
+      ],
+      "frontend": {
+        "entrypoint": "src/frontend/src/index.html"
+      },
+      "source": [
+        "src/frontend/assets",
+        "dist/frontend/"
+      ],
+      "type": "assets"
     }
   },
   "defaults": {
     "build": {
       "args": "",
       "packtool": ""
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:8000",
+      "type": "ephemeral"
     }
   },
   "output_env_file": ".env",
