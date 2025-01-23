@@ -105,51 +105,76 @@ function displayCanisters(canisters) {
         card.className = "canister-card";
         
         const createdDate = new Date(Number(info.createdAt) / 1000000);
+        const canisterIdStr = canisterId.toString();
         
         card.innerHTML = `
             <h5>${info.name}</h5>
-            <p><strong>ID:</strong> ${canisterId.toString()}</p>
+            <p><strong>ID:</strong> ${canisterIdStr}</p>
             <p><strong>Description:</strong> ${info.description}</p>
             <p><strong>Created:</strong> ${createdDate.toLocaleDateString()}</p>
-            <button onclick='window.editCanister(${JSON.stringify(canisterId.toString())}, ${JSON.stringify(info.name)}, ${JSON.stringify(info.description)})'>Edit</button>
+            <button onclick='window.editCanister(${JSON.stringify(canisterIdStr)}, ${JSON.stringify(info.name)}, ${JSON.stringify(info.description)})'>Edit</button>
             
-            <div class="metrics-container" id="metrics-${canisterId.toString()}">
+            <div class="metrics-container" id="metrics-${canisterIdStr}">
                 <h6>Monitoring Data</h6>
                 <div class="metric-data"></div>
-                <button class="refresh-button" onclick='window.refreshMetrics(${JSON.stringify(canisterId.toString())})'>Refresh Metrics</button>
+                <button class="refresh-button" onclick="refreshMetrics('${canisterIdStr}')">Refresh Metrics</button>
             </div>
         `;
         
         container.appendChild(card);
-        
-        // Fetch initial metrics
-        fetchCanisterMetrics(canisterId.toString());
     });
+    
+    // Fetch metrics for all canisters after they're displayed
+    setTimeout(() => {
+        canisters.forEach(([canisterId]) => {
+            fetchCanisterMetrics(canisterId.toString());
+        });
+    }, 100);
 }
 
 async function registerCanister() {
-    const canisterId = document.getElementById("canister-id").value;
-    const name = document.getElementById("canister-name").value;
-    const description = document.getElementById("canister-description").value;
+    const canisterId = document.getElementById("canister-id").value.trim();
+    const name = document.getElementById("canister-name").value.trim();
+    const description = document.getElementById("canister-description").value.trim();
 
     try {
+        // Validate canister ID format
+        if (!canisterId.match(/^[a-z0-9-]+$/)) {
+            alert("Invalid canister ID format. Please enter a valid canister ID.");
+            return;
+        }
+
         // Create a Principal from the canister ID string
         const canisterPrincipal = Principal.fromText(canisterId);
         const result = await actor.registerCanister(canisterPrincipal, name, description);
         
-        // The backend returns #ok(()) for success, which becomes { ok: null } in JavaScript
-        // So we check if result.ok is not undefined (even if it's null)
         if ('ok' in result) {
             alert("Canister registered successfully!");
-            await loadUserCanisters(); // Refresh the list
+            
             // Clear the form
             document.getElementById("register-canister-form").reset();
+            
+            // Refresh the list and fetch metrics with retry
+            await loadUserCanisters();
+            
+            // Add a small delay before fetching metrics to ensure canister is registered
+            setTimeout(async () => {
+                try {
+                    await fetchCanisterMetrics(canisterId);
+                } catch (error) {
+                    console.error("Error fetching initial metrics:", error);
+                }
+            }, 1000);
         } else {
             alert("Failed to register canister: " + JSON.stringify(result.err));
         }
     } catch (error) {
         console.error("Error registering canister:", error);
-        alert("Error registering canister: " + error.message);
+        if (error.message.includes("Invalid principal")) {
+            alert("Invalid canister ID format. Please check the ID and try again.");
+        } else {
+            alert("Error registering canister: " + error.message);
+        }
     }
 }
 
@@ -206,14 +231,26 @@ function updateUI(isAuthenticated) {
 }
 
 // Update monitoring functions
-async function fetchCanisterMetrics(canisterId) {
+async function fetchCanisterMetrics(canisterId, retryCount = 0) {
     try {
+        if (!actor) {
+            console.warn("Actor not initialized yet");
+            return;
+        }
+
         const principal = Principal.fromText(canisterId);
         
         // First update the metrics
         const updateResult = await actor.updateCanisterMetrics(principal);
-        if (!('ok' in updateResult)) {
+        if ('err' in updateResult) {
             console.error("Failed to update metrics:", updateResult.err);
+            
+            // If the error is due to canister not being ready, retry after a delay
+            if (retryCount < 3 && updateResult.err === 'UpdateFailed') {
+                setTimeout(() => {
+                    fetchCanisterMetrics(canisterId, retryCount + 1);
+                }, 2000 * (retryCount + 1)); // Exponential backoff
+            }
             return;
         }
 
@@ -226,6 +263,13 @@ async function fetchCanisterMetrics(canisterId) {
         }
     } catch (error) {
         console.error("Error fetching metrics:", error);
+        
+        // If it's a principal error, don't retry
+        if (!error.message.includes("Invalid principal") && retryCount < 3) {
+            setTimeout(() => {
+                fetchCanisterMetrics(canisterId, retryCount + 1);
+            }, 2000 * (retryCount + 1)); // Exponential backoff
+        }
     }
 }
 
@@ -234,19 +278,34 @@ function displayMetrics(canisterId, metrics) {
     if (!metricsContainer) return;
 
     const lastUpdated = new Date(Number(metrics.lastUpdated) / 1000000);
+    const createdAt = new Date(Number(metrics.createdAt) / 1000000);
     
     metricsContainer.innerHTML = `
         <div class="metric-item">
-            <span class="metric-label">Memory Size:</span>
+            <span class="metric-label">Memory Usage:</span>
             ${formatBytes(metrics.memorySize)}
         </div>
         <div class="metric-item">
-            <span class="metric-label">Cycles:</span>
+            <span class="metric-label">Available Cycles:</span>
             ${formatNumber(metrics.cycles)}
         </div>
         <div class="metric-item">
+            <span class="metric-label">Storage Utilization:</span>
+            ${formatBytes(metrics.storageUtilization)}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Module Hash:</span>
+            ${metrics.moduleHash ? Array.from(metrics.moduleHash).map(b => b.toString(16).padStart(2, '0')).join('') : 'Not available'}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Controllers:</span>
+            <div class="controllers-list">
+                ${metrics.controllers.map(controller => `<div class="controller">${controller.toString()}</div>`).join('')}
+            </div>
+        </div>
+        <div class="metric-item">
             <span class="metric-label">Status:</span>
-            ${metrics.status}
+            <span class="status-badge status-${metrics.status.toLowerCase()}">${metrics.status}</span>
         </div>
         <div class="metric-item">
             <span class="metric-label">Compute Allocation:</span>
@@ -254,13 +313,68 @@ function displayMetrics(canisterId, metrics) {
         </div>
         <div class="metric-item">
             <span class="metric-label">Freezing Threshold:</span>
-            ${formatNumber(metrics.freezingThreshold)}
+            ${formatNumber(metrics.freezingThreshold)} seconds
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Creation Time:</span>
+            ${createdAt.toLocaleString()}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Subnet ID:</span>
+            ${metrics.subnetId ? metrics.subnetId.toString() : 'Not available'}
         </div>
         <div class="metric-item">
             <span class="metric-label">Last Updated:</span>
             ${lastUpdated.toLocaleString()}
         </div>
     `;
+
+    // Add some styling for status badges
+    const style = document.createElement('style');
+    style.textContent = `
+        .metric-item {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            background: #f5f5f5;
+        }
+        .metric-label {
+            font-weight: bold;
+            color: #333;
+            margin-right: 8px;
+        }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+        .status-running {
+            background: #e6ffe6;
+            color: #006600;
+        }
+        .status-stopping {
+            background: #fff3e6;
+            color: #cc6600;
+        }
+        .status-stopped {
+            background: #ffe6e6;
+            color: #cc0000;
+        }
+        .controllers-list {
+            margin-top: 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .controller {
+            padding: 4px;
+            background: #e6e6e6;
+            margin: 2px 0;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+    `;
+    document.head.appendChild(style);
 }
 
 function formatBytes(bytes) {
@@ -289,19 +403,26 @@ function startPeriodicMetricsUpdate() {
     
     async function updateAllMetrics() {
         try {
+            if (!actor) {
+                console.warn("Actor not initialized yet");
+                return;
+            }
+
             const result = await actor.listUserCanisters();
             if (result.ok) {
-                result.ok.forEach(([canisterId, _]) => {
-                    fetchCanisterMetrics(canisterId.toString());
-                });
+                for (const [canisterId] of result.ok) {
+                    await fetchCanisterMetrics(canisterId.toString());
+                }
             }
         } catch (error) {
             console.error("Error updating metrics:", error);
         }
     }
     
-    // Initial update
-    updateAllMetrics();
+    // Clear any existing interval
+    if (window.metricsUpdateInterval) {
+        clearInterval(window.metricsUpdateInterval);
+    }
     
     // Set up periodic updates
     window.metricsUpdateInterval = setInterval(updateAllMetrics, EIGHT_HOURS);

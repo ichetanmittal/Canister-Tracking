@@ -54,15 +54,17 @@ actor {
 
     // New types for monitoring
     type CanisterMetrics = {
-        memorySize: Nat;
-        cycles: Nat;
-        moduleHash: ?[Nat8];
-        controllers: [Principal];
-        status: Text;
-        computeAllocation: Nat;
-        freezingThreshold: Nat;
-        subnetId: ?Principal;
-        lastUpdated: Int;
+        memorySize: Nat;  // Memory usage
+        cycles: Nat;      // Available cycles
+        moduleHash: ?[Nat8];  // Module hash
+        controllers: [Principal];  // Controllers
+        status: Text;     // Canister status
+        computeAllocation: Nat;  // Compute allocation
+        freezingThreshold: Nat;  // Freezing threshold
+        createdAt: Int;   // Creation timestamp
+        subnetId: ?Principal;  // Subnet information
+        storageUtilization: Nat;  // Storage utilization
+        lastUpdated: Int;  // Last time metrics were updated
     };
 
     type MonitoringError = {
@@ -256,7 +258,9 @@ actor {
                         };
                         computeAllocation = status.settings.compute_allocation;
                         freezingThreshold = status.settings.freezing_threshold;
-                        subnetId = null;
+                        createdAt = info.createdAt;  // Use the creation time from CanisterInfo
+                        subnetId = null;  // This will be updated when we get subnet info
+                        storageUtilization = status.memory_size;  // For now, use memory size as storage utilization
                         lastUpdated = Time.now();
                     };
 
