@@ -6,6 +6,7 @@ import Text "mo:base/Text";
 import Option "mo:base/Option";
 import Iter "mo:base/Iter";
 import Time "mo:base/Time";
+import Nat "mo:base/Nat";
 
 actor {
     // Types
@@ -25,6 +26,51 @@ actor {
         createdAt: Int;
     };
 
+    // IC Management Canister interface
+    type Status = {
+        #running;
+        #stopping;
+        #stopped;
+    };
+
+    type DefiniteCanisterSettings = {
+        controllers : [Principal];
+        compute_allocation : Nat;
+        memory_allocation : Nat;
+        freezing_threshold : Nat;
+    };
+
+    type CanisterStatus = {
+        status : Status;
+        settings : DefiniteCanisterSettings;
+        module_hash : ?[Nat8];
+        memory_size : Nat;
+        cycles : Nat;
+    };
+
+    let management_canister : actor {
+        canister_status : { canister_id : Principal } -> async CanisterStatus;
+    } = actor "aaaaa-aa";
+
+    // New types for monitoring
+    type CanisterMetrics = {
+        memorySize: Nat;
+        cycles: Nat;
+        moduleHash: ?[Nat8];
+        controllers: [Principal];
+        status: Text;
+        computeAllocation: Nat;
+        freezingThreshold: Nat;
+        subnetId: ?Principal;
+        lastUpdated: Int;
+    };
+
+    type MonitoringError = {
+        #CanisterNotFound;
+        #UpdateFailed;
+        #NotAuthorized;
+    };
+
     // State
     private stable var registeredUsers : [(Principal, Text)] = [];
     private var users = HashMap.HashMap<Principal, Text>(10, Principal.equal, Principal.hash);
@@ -32,15 +78,21 @@ actor {
     private stable var registeredCanisters : [(CanisterId, CanisterInfo)] = [];
     private var canisters = HashMap.HashMap<CanisterId, CanisterInfo>(10, Principal.equal, Principal.hash);
 
+    // Additional state for monitoring
+    private stable var canisterMetrics : [(CanisterId, CanisterMetrics)] = [];
+    private var metrics = HashMap.HashMap<CanisterId, CanisterMetrics>(10, Principal.equal, Principal.hash);
+
     // Initialize state
     system func preupgrade() {
         registeredUsers := Iter.toArray(users.entries());
         registeredCanisters := Iter.toArray(canisters.entries());
+        canisterMetrics := Iter.toArray(metrics.entries());
     };
 
     system func postupgrade() {
         users := HashMap.fromIter<Principal, Text>(registeredUsers.vals(), 10, Principal.equal, Principal.hash);
         canisters := HashMap.fromIter<CanisterId, CanisterInfo>(registeredCanisters.vals(), 10, Principal.equal, Principal.hash);
+        metrics := HashMap.fromIter<CanisterId, CanisterMetrics>(canisterMetrics.vals(), 10, Principal.equal, Principal.hash);
     };
 
     // Authentication methods
@@ -173,5 +225,89 @@ actor {
                 #err(#NotFound)
             };
         }
+    };
+
+    // Update monitoring methods
+    public shared(msg) func updateCanisterMetrics(canisterId: Principal) : async Result.Result<(), MonitoringError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        switch (canisters.get(canisterId)) {
+            case (?info) {
+                if (not Principal.equal(info.owner, caller)) {
+                    return #err(#NotAuthorized);
+                };
+                
+                try {
+                    let status = await management_canister.canister_status({ canister_id = canisterId });
+                    
+                    let metricData : CanisterMetrics = {
+                        memorySize = status.memory_size;
+                        cycles = status.cycles;
+                        moduleHash = status.module_hash;
+                        controllers = status.settings.controllers;
+                        status = switch (status.status) {
+                            case (#running) { "running" };
+                            case (#stopping) { "stopping" };
+                            case (#stopped) { "stopped" };
+                        };
+                        computeAllocation = status.settings.compute_allocation;
+                        freezingThreshold = status.settings.freezing_threshold;
+                        subnetId = null;
+                        lastUpdated = Time.now();
+                    };
+
+                    metrics.put(canisterId, metricData);
+                    #ok(())
+                } catch (e) {
+                    #err(#UpdateFailed)
+                };
+            };
+            case null {
+                #err(#CanisterNotFound)
+            };
+        }
+    };
+
+    public shared query(msg) func getCanisterMetrics(canisterId: Principal) : async Result.Result<CanisterMetrics, MonitoringError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        switch (metrics.get(canisterId)) {
+            case (?m) {
+                #ok(m)
+            };
+            case null {
+                #err(#CanisterNotFound)
+            };
+        }
+    };
+
+    public shared query(msg) func getAllCanisterMetrics() : async Result.Result<[(CanisterId, CanisterMetrics)], MonitoringError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        let userMetrics = Iter.toArray(
+            Iter.filter(
+                metrics.entries(),
+                func((canisterId, _): (CanisterId, CanisterMetrics)): Bool {
+                    switch (canisters.get(canisterId)) {
+                        case (?info) { Principal.equal(info.owner, caller) };
+                        case null { false };
+                    }
+                }
+            )
+        );
+
+        #ok(userMetrics)
     };
 };
