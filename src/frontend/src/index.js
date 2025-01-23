@@ -68,6 +68,7 @@ async function handleAuthenticated() {
 
     // Load and display user's canisters
     await loadUserCanisters();
+    startPeriodicMetricsUpdate();
 
     // Set up canister registration form handler
     const registerForm = document.getElementById("register-canister-form");
@@ -92,7 +93,7 @@ async function loadUserCanisters() {
 
 function displayCanisters(canisters) {
     const container = document.getElementById("canisters-container");
-    container.innerHTML = ""; // Clear existing content
+    container.innerHTML = "";
 
     if (canisters.length === 0) {
         container.innerHTML = "<p>No canisters registered yet.</p>";
@@ -103,18 +104,26 @@ function displayCanisters(canisters) {
         const card = document.createElement("div");
         card.className = "canister-card";
         
-        const createdDate = new Date(Number(info.createdAt) / 1000000); // Convert nanoseconds to milliseconds
+        const createdDate = new Date(Number(info.createdAt) / 1000000);
         
-        // Properly escape values and use JSON.stringify for string values to handle special characters
         card.innerHTML = `
             <h5>${info.name}</h5>
             <p><strong>ID:</strong> ${canisterId.toString()}</p>
             <p><strong>Description:</strong> ${info.description}</p>
             <p><strong>Created:</strong> ${createdDate.toLocaleDateString()}</p>
             <button onclick='window.editCanister(${JSON.stringify(canisterId.toString())}, ${JSON.stringify(info.name)}, ${JSON.stringify(info.description)})'>Edit</button>
+            
+            <div class="metrics-container" id="metrics-${canisterId.toString()}">
+                <h6>Monitoring Data</h6>
+                <div class="metric-data"></div>
+                <button class="refresh-button" onclick='window.refreshMetrics(${JSON.stringify(canisterId.toString())})'>Refresh Metrics</button>
+            </div>
         `;
         
         container.appendChild(card);
+        
+        // Fetch initial metrics
+        fetchCanisterMetrics(canisterId.toString());
     });
 }
 
@@ -187,6 +196,108 @@ function updateUI(isAuthenticated) {
         userSection.style.display = "none";
         document.getElementById("principalId").textContent = "";
     }
+}
+
+// Update monitoring functions
+async function fetchCanisterMetrics(canisterId) {
+    try {
+        const principal = Principal.fromText(canisterId);
+        
+        // First update the metrics
+        const updateResult = await actor.updateCanisterMetrics(principal);
+        if (!('ok' in updateResult)) {
+            console.error("Failed to update metrics:", updateResult.err);
+            return;
+        }
+
+        // Then fetch the updated metrics
+        const result = await actor.getCanisterMetrics(principal);
+        if (result.ok) {
+            displayMetrics(canisterId, result.ok);
+        } else {
+            console.error("Failed to fetch metrics:", result.err);
+        }
+    } catch (error) {
+        console.error("Error fetching metrics:", error);
+    }
+}
+
+function displayMetrics(canisterId, metrics) {
+    const metricsContainer = document.querySelector(`#metrics-${canisterId} .metric-data`);
+    if (!metricsContainer) return;
+
+    const lastUpdated = new Date(Number(metrics.lastUpdated) / 1000000);
+    
+    metricsContainer.innerHTML = `
+        <div class="metric-item">
+            <span class="metric-label">Memory Size:</span>
+            ${formatBytes(metrics.memorySize)}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Cycles:</span>
+            ${formatNumber(metrics.cycles)}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Status:</span>
+            ${metrics.status}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Compute Allocation:</span>
+            ${Number(metrics.computeAllocation)}%
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Freezing Threshold:</span>
+            ${formatNumber(metrics.freezingThreshold)}
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Last Updated:</span>
+            ${lastUpdated.toLocaleString()}
+        </div>
+    `;
+}
+
+function formatBytes(bytes) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = Number(bytes);
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+    
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function formatNumber(num) {
+    return new Intl.NumberFormat().format(Number(num));
+}
+
+// Add to window object for HTML access
+window.refreshMetrics = fetchCanisterMetrics;
+
+// Add periodic metrics update (every 8 hours)
+function startPeriodicMetricsUpdate() {
+    const EIGHT_HOURS = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+    
+    async function updateAllMetrics() {
+        try {
+            const result = await actor.listUserCanisters();
+            if (result.ok) {
+                result.ok.forEach(([canisterId, _]) => {
+                    fetchCanisterMetrics(canisterId.toString());
+                });
+            }
+        } catch (error) {
+            console.error("Error updating metrics:", error);
+        }
+    }
+    
+    // Initial update
+    updateAllMetrics();
+    
+    // Set up periodic updates
+    setInterval(updateAllMetrics, EIGHT_HOURS);
 }
 
 init();
