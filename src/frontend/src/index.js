@@ -105,12 +105,13 @@ function displayCanisters(canisters) {
         
         const createdDate = new Date(Number(info.createdAt) / 1000000); // Convert nanoseconds to milliseconds
         
+        // Properly escape values and use JSON.stringify for string values to handle special characters
         card.innerHTML = `
             <h5>${info.name}</h5>
             <p><strong>ID:</strong> ${canisterId.toString()}</p>
             <p><strong>Description:</strong> ${info.description}</p>
             <p><strong>Created:</strong> ${createdDate.toLocaleDateString()}</p>
-            <button onclick="editCanister('${canisterId}', '${info.name}', '${info.description}')">Edit</button>
+            <button onclick='window.editCanister(${JSON.stringify(canisterId.toString())}, ${JSON.stringify(info.name)}, ${JSON.stringify(info.description)})'>Edit</button>
         `;
         
         container.appendChild(card);
@@ -127,7 +128,9 @@ async function registerCanister() {
         const canisterPrincipal = Principal.fromText(canisterId);
         const result = await actor.registerCanister(canisterPrincipal, name, description);
         
-        if (result.ok) {
+        // The backend returns #ok(()) for success, which becomes { ok: null } in JavaScript
+        // So we check if result.ok is not undefined (even if it's null)
+        if ('ok' in result) {
             alert("Canister registered successfully!");
             await loadUserCanisters(); // Refresh the list
             // Clear the form
@@ -141,7 +144,8 @@ async function registerCanister() {
     }
 }
 
-async function editCanister(canisterId, currentName, currentDescription) {
+// Make editCanister function available globally
+window.editCanister = async function editCanister(canisterId, currentName, currentDescription) {
     const newName = prompt("Enter new name:", currentName);
     if (!newName) return;
 
@@ -152,13 +156,15 @@ async function editCanister(canisterId, currentName, currentDescription) {
         const principal = Principal.fromText(canisterId);
         const result = await actor.updateCanisterInfo(principal, newName, newDescription);
         
-        if (result.ok) {
+        // Check if 'ok' property exists in result, even if it's null
+        if ('ok' in result) {
             alert("Canister updated successfully!");
             await loadUserCanisters(); // Refresh the list
         } else {
             alert("Failed to update canister: " + JSON.stringify(result.err));
         }
     } catch (error) {
+        console.error("Error updating canister:", error);
         alert("Error updating canister: " + error.message);
     }
 }
