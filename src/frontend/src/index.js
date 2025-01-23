@@ -181,7 +181,14 @@ window.editCanister = async function editCanister(canisterId, currentName, curre
 async function logout() {
     await authClient.logout();
     actor = null;
+    // Clear any periodic updates
+    if (window.metricsUpdateInterval) {
+        clearInterval(window.metricsUpdateInterval);
+        window.metricsUpdateInterval = null;
+    }
     updateUI(false);
+    // Force a page reload to ensure clean state
+    window.location.reload();
 }
 
 function updateUI(isAuthenticated) {
@@ -297,7 +304,7 @@ function startPeriodicMetricsUpdate() {
     updateAllMetrics();
     
     // Set up periodic updates
-    setInterval(updateAllMetrics, EIGHT_HOURS);
+    window.metricsUpdateInterval = setInterval(updateAllMetrics, EIGHT_HOURS);
 }
 
 init();
