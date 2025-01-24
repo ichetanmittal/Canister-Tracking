@@ -21,6 +21,7 @@ async function init() {
     const logoutButton = document.getElementById("logoutButton");
     const authSection = document.getElementById("auth-section");
     const userSection = document.getElementById("user-section");
+    const logoutSection = document.getElementById("logout-section");
 
     loginButton.onclick = login;
     logoutButton.onclick = logout;
@@ -218,13 +219,16 @@ async function logout() {
 
 function updateUI(isAuthenticated) {
     const authSection = document.getElementById("auth-section");
+    const logoutSection = document.getElementById("logout-section");
     const userSection = document.getElementById("user-section");
     
     if (isAuthenticated) {
         authSection.style.display = "none";
+        logoutSection.style.display = "block";
         userSection.style.display = "block";
     } else {
         authSection.style.display = "block";
+        logoutSection.style.display = "none";
         userSection.style.display = "none";
         document.getElementById("principalId").textContent = "";
     }
@@ -257,7 +261,21 @@ async function fetchCanisterMetrics(canisterId, retryCount = 0) {
         // Then fetch the updated metrics
         const result = await actor.getCanisterMetrics(principal);
         if (result.ok) {
+            // Store metrics in history
+            if (!metricsHistory[canisterId]) {
+                metricsHistory[canisterId] = [];
+            }
+            metricsHistory[canisterId].push({
+                timestamp: Date.now(),
+                ...result.ok
+            });
+
+            // Keep only last 30 days of data
+            const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+            metricsHistory[canisterId] = metricsHistory[canisterId].filter(m => m.timestamp > thirtyDaysAgo);
+
             displayMetrics(canisterId, result.ok);
+            updateCharts(canisterId);
         } else {
             console.error("Failed to fetch metrics:", result.err);
         }
@@ -273,9 +291,258 @@ async function fetchCanisterMetrics(canisterId, retryCount = 0) {
     }
 }
 
+let cyclesChart, cycleBurnRateChart, memoryChart, computeChart, freezingChart;
+let metricsHistory = {};
+let moduleUpdates = {};
+
+function calculateCycleBurnRate(metrics) {
+    if (metrics.length < 2) return 0;
+    const latest = metrics[metrics.length - 1];
+    const previous = metrics[metrics.length - 2];
+    const timeDiff = (latest.timestamp - previous.timestamp) / (1000 * 60 * 60); // Convert to hours
+    const cyclesDiff = Number(previous.cycles) - Number(latest.cycles);
+    return cyclesDiff / timeDiff; // Cycles per hour
+}
+
+function createCharts(canisterId) {
+    const ctx = {
+        cycles: document.getElementById('cyclesChart').getContext('2d'),
+        cycleBurnRate: document.getElementById('cycleBurnRateChart').getContext('2d'),
+        memory: document.getElementById('memoryChart').getContext('2d'),
+        compute: document.getElementById('computeChart').getContext('2d'),
+        freezing: document.getElementById('freezingChart').getContext('2d')
+    };
+
+    cyclesChart = new Chart(ctx.cycles, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Cycles Balance',
+                data: [],
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Cycles'
+                    }
+                }
+            }
+        }
+    });
+
+    cycleBurnRateChart = new Chart(ctx.cycleBurnRate, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Cycle Burn Rate (per hour)',
+                data: [],
+                borderColor: 'rgb(255, 159, 64)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Cycles/Hour'
+                    }
+                }
+            }
+        }
+    });
+
+    memoryChart = new Chart(ctx.memory, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Memory Usage',
+                data: [],
+                borderColor: 'rgb(255, 99, 132)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Memory (Bytes)'
+                    }
+                }
+            }
+        }
+    });
+
+    computeChart = new Chart(ctx.compute, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Compute Allocation',
+                data: [],
+                borderColor: 'rgb(54, 162, 235)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Compute Units'
+                    }
+                }
+            }
+        }
+    });
+
+    freezingChart = new Chart(ctx.freezing, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Freezing Threshold',
+                data: [],
+                borderColor: 'rgb(153, 102, 255)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Threshold'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateCharts(canisterId) {
+    if (!metricsHistory[canisterId]) return;
+
+    const timeRange = document.getElementById('timeRange').value;
+    const now = Date.now();
+    let filterTime;
+
+    switch (timeRange) {
+        case '24h':
+            filterTime = now - (24 * 60 * 60 * 1000);
+            break;
+        case '7d':
+            filterTime = now - (7 * 24 * 60 * 60 * 1000);
+            break;
+        case '30d':
+            filterTime = now - (30 * 24 * 60 * 60 * 1000);
+            break;
+        default:
+            filterTime = 0;
+    }
+
+    const filteredMetrics = metricsHistory[canisterId].filter(m => m.timestamp > filterTime);
+    const labels = filteredMetrics.map(m => new Date(m.timestamp).toLocaleString());
+
+    cyclesChart.data.labels = labels;
+    cyclesChart.data.datasets[0].data = filteredMetrics.map(m => Number(m.cycles));
+    cyclesChart.update();
+
+    const burnRates = [];
+    for (let i = 1; i < filteredMetrics.length; i++) {
+        const timeDiff = (filteredMetrics[i].timestamp - filteredMetrics[i-1].timestamp) / (1000 * 60 * 60);
+        const cyclesDiff = Number(filteredMetrics[i-1].cycles) - Number(filteredMetrics[i].cycles);
+        burnRates.push(cyclesDiff / timeDiff);
+    }
+    cycleBurnRateChart.data.labels = labels.slice(1);
+    cycleBurnRateChart.data.datasets[0].data = burnRates;
+    cycleBurnRateChart.update();
+
+    memoryChart.data.labels = labels;
+    memoryChart.data.datasets[0].data = filteredMetrics.map(m => Number(m.memorySize));
+    memoryChart.update();
+
+    computeChart.data.labels = labels;
+    computeChart.data.datasets[0].data = filteredMetrics.map(m => Number(m.computeAllocation || 0));
+    computeChart.update();
+
+    freezingChart.data.labels = labels;
+    freezingChart.data.datasets[0].data = filteredMetrics.map(m => Number(m.freezingThreshold || 0));
+    freezingChart.update();
+}
+
 function displayMetrics(canisterId, metrics) {
-    const metricsContainer = document.querySelector(`#metrics-${canisterId} .metric-data`);
+    const metricsContainer = document.getElementById(`metrics-${canisterId}`);
     if (!metricsContainer) return;
+
+    document.getElementById('metrics-section').style.display = 'block';
+    
+    if (!cyclesChart) {
+        createCharts(canisterId);
+    }
+
+    // Check for module hash changes
+    if (!moduleUpdates[canisterId]) {
+        moduleUpdates[canisterId] = [];
+    }
+    
+    const currentHash = metrics.moduleHash ? Array.from(metrics.moduleHash).map(b => b.toString(16).padStart(2, '0')).join('') : null;
+    const lastUpdate = moduleUpdates[canisterId][moduleUpdates[canisterId].length - 1];
+    
+    if (currentHash && (!lastUpdate || lastUpdate.hash !== currentHash)) {
+        moduleUpdates[canisterId].push({
+            timestamp: Date.now(),
+            hash: currentHash
+        });
+    }
+
+    // Update module updates timeline
+    const timelineContainer = document.getElementById('moduleUpdatesTimeline');
+    timelineContainer.innerHTML = moduleUpdates[canisterId]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .map(update => `
+            <div class="update-entry">
+                <span class="update-time">${new Date(update.timestamp).toLocaleString()}</span>
+                <span class="update-hash">${update.hash}</span>
+            </div>
+        `).join('');
+
+    const normalizedMetrics = {
+        timestamp: Date.now(),
+        cycles: Number(metrics.cycles),
+        memorySize: Number(metrics.memorySize),
+        computeAllocation: Number(metrics.computeAllocation || 0),
+        freezingThreshold: Number(metrics.freezingThreshold || 0),
+        ...metrics
+    };
+
+    // Update metrics history
+    if (!metricsHistory[canisterId]) {
+        metricsHistory[canisterId] = [];
+    }
+    metricsHistory[canisterId].push(normalizedMetrics);
+
+    // Keep only last 30 days of data
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    metricsHistory[canisterId] = metricsHistory[canisterId].filter(m => m.timestamp > thirtyDaysAgo);
 
     const lastUpdated = new Date(Number(metrics.lastUpdated) / 1000000);
     const createdAt = new Date(Number(metrics.createdAt) / 1000000);
@@ -309,11 +576,11 @@ function displayMetrics(canisterId, metrics) {
         </div>
         <div class="metric-item">
             <span class="metric-label">Compute Allocation:</span>
-            ${Number(metrics.computeAllocation)}%
+            ${Number(metrics.computeAllocation || 0)}%
         </div>
         <div class="metric-item">
             <span class="metric-label">Freezing Threshold:</span>
-            ${formatNumber(metrics.freezingThreshold)} seconds
+            ${formatNumber(metrics.freezingThreshold || 0)} seconds
         </div>
         <div class="metric-item">
             <span class="metric-label">Creation Time:</span>
