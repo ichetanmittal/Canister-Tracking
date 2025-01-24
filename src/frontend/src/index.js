@@ -703,19 +703,28 @@ window.depositICP = async function depositICP() {
     }
 
     try {
-        const result = await actor.depositICP(BigInt(amount * 100000000)); // Convert to e8s
-        console.log("Deposit result:", result);
+        // Convert amount to BigInt e8s
+        const amountE8s = BigInt(Math.floor(amount * 100000000));
+        const result = await actor.depositICP(amountE8s);
         
-        if (result.ok) {
-            alert("ICP deposited successfully!");
+        if ('ok' in result) {
+            console.log("Deposit successful");
             document.getElementById("deposit-amount").value = "";
             await loadICPBalance();
-        } else {
+            alert("ICP deposited successfully!");
+        } else if ('err' in result) {
+            console.error("Deposit failed with error:", result.err);
             alert("Failed to deposit ICP: " + JSON.stringify(result.err));
         }
     } catch (error) {
-        console.error("Error depositing ICP:", error);
-        alert("Error depositing ICP: " + error.message);
+        console.error("Error during deposit:", error);
+        // Only show error if it's not related to response parsing
+        if (!error.message.includes("JSON") && !error.message.includes("parse")) {
+            alert("Error depositing ICP: " + error.message);
+        } else {
+            console.log("Deposit may have succeeded, refreshing balance...");
+            await loadICPBalance();
+        }
     }
 }
 
