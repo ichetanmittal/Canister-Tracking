@@ -262,6 +262,91 @@
                 align-items: stretch;
             }
         }
+
+        /* Rule Management Styles */
+        .rule-card {
+            background-color: var(--card-bg);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            margin: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .rule-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .rule-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .rule-status.enabled {
+            background-color: #DEF7EC;
+            color: #03543F;
+        }
+
+        .rule-status.disabled {
+            background-color: #FDE8E8;
+            color: #9B1C1C;
+        }
+
+        .rule-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        button.danger {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        button.danger:hover {
+            background-color: var(--danger-hover);
+        }
+
+        #rules-section .card {
+            margin-bottom: 2rem;
+        }
+
+        #rules-section h4 {
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        #icpBalance {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
     </style>
 </head>
 <body>
@@ -340,6 +425,74 @@
                     <div class="chart-container module-updates">
                         <h3>Module Updates Timeline</h3>
                         <div id="moduleUpdatesTimeline"></div>
+                    </div>
+                </div>
+
+                <!-- Rule Management Section -->
+                <div id="rules-section" class="form-section">
+                    <h3>Automated Rules</h3>
+                    
+                    <!-- ICP Balance Management -->
+                    <div class="card">
+                        <h4>ICP Balance</h4>
+                        <p>Current Balance: <span id="icpBalance">0</span> ICP</p>
+                        <div class="form-group">
+                            <label for="deposit-amount">Deposit Amount (ICP)</label>
+                            <input type="number" id="deposit-amount" min="0" step="0.01" placeholder="Enter amount">
+                            <button onclick="depositICP()" class="primary">Deposit ICP</button>
+                        </div>
+                    </div>
+
+                    <!-- Create Rule Form -->
+                    <div class="card">
+                        <h4>Create New Rule</h4>
+                        <form id="create-rule-form">
+                            <div class="form-group">
+                                <label for="rule-canister">Canister</label>
+                                <select id="rule-canister" required></select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="rule-condition-type">Condition Type</label>
+                                <select id="rule-condition-type" required>
+                                    <option value="cycles">Cycles Below</option>
+                                    <option value="memory">Memory Usage Above</option>
+                                    <option value="compute">Compute Allocation Above</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="rule-condition-value">Threshold Value</label>
+                                <input type="number" id="rule-condition-value" required min="0">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="rule-action-type">Action</label>
+                                <select id="rule-action-type" required>
+                                    <option value="topup">Top Up Cycles</option>
+                                    <option value="notify">Send Notification</option>
+                                    <option value="compute">Adjust Compute Allocation</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="rule-action-value">Action Value</label>
+                                <input type="number" id="rule-action-value" required min="0">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="rule-cooldown">Cooldown Period (hours)</label>
+                                <input type="number" id="rule-cooldown" required min="1" value="24">
+                            </div>
+                            
+                            <button type="submit" class="primary">Create Rule</button>
+                        </form>
+                    </div>
+
+                    <!-- Active Rules List -->
+                    <div class="card">
+                        <h4>Active Rules</h4>
+                        <div id="rules-container"></div>
                     </div>
                 </div>
             </div>

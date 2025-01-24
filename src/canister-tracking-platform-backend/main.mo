@@ -7,6 +7,7 @@ import Option "mo:base/Option";
 import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Nat "mo:base/Nat";
+import Int "mo:base/Int";
 
 actor {
     // Types
@@ -73,6 +74,38 @@ actor {
         #NotAuthorized;
     };
 
+    // Rule-based action types
+    type RuleCondition = {
+        #CyclesBelow: Nat;  // Trigger when cycles fall below this amount
+        #MemoryUsageAbove: Nat;  // Trigger when memory usage exceeds this amount
+        #ComputeAllocationAbove: Nat;  // Trigger when compute allocation exceeds this percentage
+    };
+
+    type RuleAction = {
+        #TopUpCycles: Nat;  // Amount of cycles to top up
+        #NotifyOwner: Text;  // Message to send to owner
+        #AdjustComputeAllocation: Nat;  // New compute allocation to set
+    };
+
+    type Rule = {
+        id: Text;  // Unique identifier for the rule
+        canisterId: Principal;
+        condition: RuleCondition;
+        action: RuleAction;
+        enabled: Bool;
+        lastTriggered: ?Int;  // Timestamp of last trigger
+        cooldownPeriod: Int;  // Minimum time (in nanoseconds) between triggers
+        owner: Principal;
+    };
+
+    type RuleError = {
+        #NotAuthorized;
+        #RuleNotFound;
+        #InvalidCondition;
+        #InvalidAction;
+        #InsufficientBalance;
+    };
+
     // State
     private stable var registeredUsers : [(Principal, Text)] = [];
     private var users = HashMap.HashMap<Principal, Text>(10, Principal.equal, Principal.hash);
@@ -84,17 +117,29 @@ actor {
     private stable var canisterMetrics : [(CanisterId, CanisterMetrics)] = [];
     private var metrics = HashMap.HashMap<CanisterId, CanisterMetrics>(10, Principal.equal, Principal.hash);
 
+    // Rule-based action state
+    private stable var userRules : [(Text, Rule)] = [];
+    private var rules = HashMap.HashMap<Text, Rule>(10, Text.equal, Text.hash);
+
+    // User ICP balances for automatic top-ups
+    private stable var userBalances : [(Principal, Nat)] = [];
+    private var balances = HashMap.HashMap<Principal, Nat>(10, Principal.equal, Principal.hash);
+
     // Initialize state
     system func preupgrade() {
         registeredUsers := Iter.toArray(users.entries());
         registeredCanisters := Iter.toArray(canisters.entries());
         canisterMetrics := Iter.toArray(metrics.entries());
+        userRules := Iter.toArray(rules.entries());
+        userBalances := Iter.toArray(balances.entries());
     };
 
     system func postupgrade() {
         users := HashMap.fromIter<Principal, Text>(registeredUsers.vals(), 10, Principal.equal, Principal.hash);
         canisters := HashMap.fromIter<CanisterId, CanisterInfo>(registeredCanisters.vals(), 10, Principal.equal, Principal.hash);
         metrics := HashMap.fromIter<CanisterId, CanisterMetrics>(canisterMetrics.vals(), 10, Principal.equal, Principal.hash);
+        rules := HashMap.fromIter<Text, Rule>(userRules.vals(), 10, Text.equal, Text.hash);
+        balances := HashMap.fromIter<Principal, Nat>(userBalances.vals(), 10, Principal.equal, Principal.hash);
     };
 
     // Authentication methods
@@ -313,5 +358,224 @@ actor {
         );
 
         #ok(userMetrics)
+    };
+
+    // Rule management methods
+    public shared(msg) func createRule(
+        canisterId: Principal,
+        condition: RuleCondition,
+        action: RuleAction,
+        cooldownPeriod: Int
+    ) : async Result.Result<Text, RuleError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        // Verify canister ownership
+        switch (canisters.get(canisterId)) {
+            case (?info) {
+                if (not Principal.equal(info.owner, caller)) {
+                    return #err(#NotAuthorized);
+                };
+            };
+            case null {
+                return #err(#NotAuthorized);
+            };
+        };
+
+        // Generate unique rule ID
+        let ruleId = Principal.toText(caller) # "-" # Int.toText(Time.now());
+
+        let newRule : Rule = {
+            id = ruleId;
+            canisterId = canisterId;
+            condition = condition;
+            action = action;
+            enabled = true;
+            lastTriggered = null;
+            cooldownPeriod = cooldownPeriod;
+            owner = caller;
+        };
+
+        rules.put(ruleId, newRule);
+        #ok(ruleId)
+    };
+
+    public shared(msg) func updateRule(
+        ruleId: Text,
+        condition: ?RuleCondition,
+        action: ?RuleAction,
+        enabled: ?Bool,
+        cooldownPeriod: ?Int
+    ) : async Result.Result<(), RuleError> {
+        let caller = msg.caller;
+        
+        switch (rules.get(ruleId)) {
+            case (?rule) {
+                if (not Principal.equal(rule.owner, caller)) {
+                    return #err(#NotAuthorized);
+                };
+
+                let updatedRule : Rule = {
+                    id = rule.id;
+                    canisterId = rule.canisterId;
+                    condition = Option.get(condition, rule.condition);
+                    action = Option.get(action, rule.action);
+                    enabled = Option.get(enabled, rule.enabled);
+                    lastTriggered = rule.lastTriggered;
+                    cooldownPeriod = Option.get(cooldownPeriod, rule.cooldownPeriod);
+                    owner = rule.owner;
+                };
+
+                rules.put(ruleId, updatedRule);
+                #ok(())
+            };
+            case null {
+                #err(#RuleNotFound)
+            };
+        }
+    };
+
+    public shared(msg) func deleteRule(ruleId: Text) : async Result.Result<(), RuleError> {
+        let caller = msg.caller;
+        
+        switch (rules.get(ruleId)) {
+            case (?rule) {
+                if (not Principal.equal(rule.owner, caller)) {
+                    return #err(#NotAuthorized);
+                };
+
+                rules.delete(ruleId);
+                #ok(())
+            };
+            case null {
+                #err(#RuleNotFound)
+            };
+        }
+    };
+
+    public shared query(msg) func listRules() : async Result.Result<[Rule], RuleError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        let userRulesList = Iter.toArray(
+            Iter.filter(
+                rules.vals(),
+                func(rule: Rule): Bool {
+                    Principal.equal(rule.owner, caller)
+                }
+            )
+        );
+
+        #ok(userRulesList)
+    };
+
+    // ICP balance management
+    public shared(msg) func depositICP(amount: Nat) : async Result.Result<(), RuleError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        let currentBalance = Option.get(balances.get(caller), 0);
+        balances.put(caller, currentBalance + amount);
+        #ok(())
+    };
+
+    public shared query(msg) func getICPBalance() : async Result.Result<Nat, RuleError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        #ok(Option.get(balances.get(caller), 0))
+    };
+
+    // Rule evaluation and execution
+    private func evaluateRule(rule: Rule, metrics: CanisterMetrics) : Bool {
+        if (not rule.enabled) {
+            return false;
+        };
+
+        // Check cooldown period
+        switch (rule.lastTriggered) {
+            case (?lastTrigger) {
+                if (Time.now() - lastTrigger < rule.cooldownPeriod) {
+                    return false;
+                };
+            };
+            case null {};
+        };
+
+        // Evaluate condition
+        switch (rule.condition) {
+            case (#CyclesBelow(threshold)) {
+                metrics.cycles < threshold
+            };
+            case (#MemoryUsageAbove(threshold)) {
+                metrics.memorySize > threshold
+            };
+            case (#ComputeAllocationAbove(threshold)) {
+                metrics.computeAllocation > threshold
+            };
+        }
+    };
+
+    // This method should be called periodically to check and execute rules
+    public shared(msg) func checkAndExecuteRules() : async Result.Result<(), RuleError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthorized);
+        };
+
+        for ((_, rule) in rules.entries()) {
+            if (Principal.equal(rule.owner, caller)) {
+                switch (metrics.get(rule.canisterId)) {
+                    case (?canisterMetrics) {
+                        if (evaluateRule(rule, canisterMetrics)) {
+                            // Execute action based on rule type
+                            switch (rule.action) {
+                                case (#TopUpCycles(amount)) {
+                                    // Here you would implement the actual top-up logic
+                                    // This would involve converting ICP to cycles and transferring them
+                                    // For now, we'll just update the last triggered time
+                                    let updatedRule = {
+                                        rule with
+                                        lastTriggered = ?Time.now()
+                                    };
+                                    rules.put(rule.id, updatedRule);
+                                };
+                                case (#NotifyOwner(_)) {
+                                    // Implement notification logic here
+                                    let updatedRule = {
+                                        rule with
+                                        lastTriggered = ?Time.now()
+                                    };
+                                    rules.put(rule.id, updatedRule);
+                                };
+                                case (#AdjustComputeAllocation(newAllocation)) {
+                                    // Implement compute allocation adjustment logic here
+                                    let updatedRule = {
+                                        rule with
+                                        lastTriggered = ?Time.now()
+                                    };
+                                    rules.put(rule.id, updatedRule);
+                                };
+                            };
+                        };
+                    };
+                    case null {};
+                };
+            };
+        };
+        #ok(())
     };
 };

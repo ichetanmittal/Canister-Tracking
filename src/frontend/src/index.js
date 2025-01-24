@@ -67,21 +67,32 @@ async function handleAuthenticated() {
     const principal = identity.getPrincipal();
     document.getElementById("principalId").textContent = principal.toString();
 
-    // Load and display user's canisters
-    await loadUserCanisters();
+    // Load user data
+    await Promise.all([
+        loadUserCanisters(),
+        loadRules(),
+        loadICPBalance()
+    ]);
+
     startPeriodicMetricsUpdate();
 
-    // Set up canister registration form handler
+    // Set up form handlers
     const registerForm = document.getElementById("register-canister-form");
     registerForm.onsubmit = async (e) => {
         e.preventDefault();
         await registerCanister();
     };
+
+    // Start periodic rule checking
+    startPeriodicRuleCheck();
 }
 
 async function loadUserCanisters() {
     try {
+        console.log("Loading user canisters...");
         const result = await actor.listUserCanisters();
+        console.log("User canisters result:", result);
+        
         if (result.ok) {
             displayCanisters(result.ok);
         } else {
@@ -93,8 +104,12 @@ async function loadUserCanisters() {
 }
 
 function displayCanisters(canisters) {
+    console.log("Displaying canisters:", canisters);
     const container = document.getElementById("canisters-container");
+    const ruleCanisterSelect = document.getElementById("rule-canister");
+    
     container.innerHTML = "";
+    ruleCanisterSelect.innerHTML = "<option value=''>Select a canister</option>";
 
     if (canisters.length === 0) {
         container.innerHTML = "<p>No canisters registered yet.</p>";
@@ -102,6 +117,7 @@ function displayCanisters(canisters) {
     }
 
     canisters.forEach(([canisterId, info]) => {
+        console.log("Processing canister:", canisterId.toString(), info);
         const card = document.createElement("div");
         card.className = "canister-card";
         
@@ -123,6 +139,12 @@ function displayCanisters(canisters) {
         `;
         
         container.appendChild(card);
+
+        // Add canister to the rule creation dropdown
+        const option = document.createElement("option");
+        option.value = canisterIdStr;
+        option.textContent = `${info.name} (${canisterIdStr})`;
+        ruleCanisterSelect.appendChild(option);
     });
     
     // Fetch metrics for all canisters after they're displayed
@@ -211,6 +233,10 @@ async function logout() {
     if (window.metricsUpdateInterval) {
         clearInterval(window.metricsUpdateInterval);
         window.metricsUpdateInterval = null;
+    }
+    if (window.ruleCheckInterval) {
+        clearInterval(window.ruleCheckInterval);
+        window.ruleCheckInterval = null;
     }
     updateUI(false);
     // Force a page reload to ensure clean state
@@ -495,9 +521,14 @@ function displayMetrics(canisterId, metrics) {
 
     document.getElementById('metrics-section').style.display = 'block';
     
-    if (!cyclesChart) {
-        createCharts(canisterId);
-    }
+    // Destroy existing charts before creating new ones
+    if (cyclesChart) cyclesChart.destroy();
+    if (cycleBurnRateChart) cycleBurnRateChart.destroy();
+    if (memoryChart) memoryChart.destroy();
+    if (computeChart) computeChart.destroy();
+    if (freezingChart) freezingChart.destroy();
+    
+    createCharts(canisterId);
 
     // Check for module hash changes
     if (!moduleUpdates[canisterId]) {
@@ -661,7 +692,44 @@ function formatNumber(num) {
     return new Intl.NumberFormat().format(Number(num));
 }
 
-// Add to window object for HTML access
+// Make functions available globally
+window.depositICP = async function depositICP() {
+    const amount = document.getElementById("deposit-amount").value;
+    console.log("Attempting to deposit:", amount, "ICP");
+    
+    if (!amount || amount <= 0) {
+        alert("Please enter a valid amount");
+        return;
+    }
+
+    try {
+        // Convert amount to BigInt e8s
+        const amountE8s = BigInt(Math.floor(amount * 100000000));
+        const result = await actor.depositICP(amountE8s);
+        
+        if ('ok' in result) {
+            console.log("Deposit successful");
+            document.getElementById("deposit-amount").value = "";
+            await loadICPBalance();
+            alert("ICP deposited successfully!");
+        } else if ('err' in result) {
+            console.error("Deposit failed with error:", result.err);
+            alert("Failed to deposit ICP: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error("Error during deposit:", error);
+        // Only show error if it's not related to response parsing
+        if (!error.message.includes("JSON") && !error.message.includes("parse")) {
+            alert("Error depositing ICP: " + error.message);
+        } else {
+            console.log("Deposit may have succeeded, refreshing balance...");
+            await loadICPBalance();
+        }
+    }
+}
+
+window.toggleRule = toggleRule;
+window.deleteRule = deleteRule;
 window.refreshMetrics = fetchCanisterMetrics;
 
 // Add periodic metrics update (every 8 hours)
@@ -693,6 +761,246 @@ function startPeriodicMetricsUpdate() {
     
     // Set up periodic updates
     window.metricsUpdateInterval = setInterval(updateAllMetrics, EIGHT_HOURS);
+}
+
+// Rule Management Functions
+async function loadRules() {
+    try {
+        const result = await actor.listRules();
+        if (result.ok) {
+            displayRules(result.ok);
+        } else {
+            console.error("Failed to load rules:", result.err);
+        }
+    } catch (error) {
+        console.error("Error loading rules:", error);
+    }
+}
+
+function displayRules(rules) {
+    console.log("Displaying rules:", rules);
+    const container = document.getElementById("rules-container");
+    container.innerHTML = "";
+
+    if (rules.length === 0) {
+        container.innerHTML = "<p>No rules created yet.</p>";
+        return;
+    }
+
+    rules.forEach(rule => {
+        console.log("Processing rule:", rule);
+        const card = document.createElement("div");
+        card.className = "rule-card";
+        
+        // Format condition
+        let conditionText = "";
+        if ('CyclesBelow' in rule.condition) {
+            conditionText = `Cycles below ${formatNumber(rule.condition.CyclesBelow)}`;
+        } else if ('MemoryUsageAbove' in rule.condition) {
+            conditionText = `Memory usage above ${formatBytes(rule.condition.MemoryUsageAbove)}`;
+        } else if ('ComputeAllocationAbove' in rule.condition) {
+            conditionText = `Compute allocation above ${rule.condition.ComputeAllocationAbove}%`;
+        }
+
+        // Format action
+        let actionText = "";
+        if ('TopUpCycles' in rule.action) {
+            actionText = `Top up with ${formatNumber(rule.action.TopUpCycles)} cycles`;
+        } else if ('NotifyOwner' in rule.action) {
+            actionText = `Send notification: ${rule.action.NotifyOwner}`;
+        } else if ('AdjustComputeAllocation' in rule.action) {
+            actionText = `Adjust compute allocation to ${rule.action.AdjustComputeAllocation}%`;
+        }
+
+        const lastTriggered = rule.lastTriggered ? 
+            new Date(Number(rule.lastTriggered) / 1000000).toLocaleString() : 
+            "Never";
+
+        card.innerHTML = `
+            <div class="rule-header">
+                <h5>Rule for ${rule.canisterId.toString()}</h5>
+                <div class="rule-status ${rule.enabled ? 'enabled' : 'disabled'}">
+                    ${rule.enabled ? 'Enabled' : 'Disabled'}
+                </div>
+            </div>
+            <p><strong>Condition:</strong> ${conditionText}</p>
+            <p><strong>Action:</strong> ${actionText}</p>
+            <p><strong>Cooldown:</strong> ${Number(rule.cooldownPeriod) / (60 * 60 * 1000000000)} hours</p>
+            <p><strong>Last Triggered:</strong> ${lastTriggered}</p>
+            <div class="rule-actions">
+                <button onclick="toggleRule('${rule.id}', ${!rule.enabled})" class="secondary">
+                    ${rule.enabled ? 'Disable' : 'Enable'}
+                </button>
+                <button onclick="deleteRule('${rule.id}')" class="danger">Delete</button>
+            </div>
+        `;
+        
+        container.appendChild(card);
+    });
+}
+
+async function createRule(event) {
+    event.preventDefault();
+
+    const canisterId = document.getElementById("rule-canister").value;
+    const conditionType = document.getElementById("rule-condition-type").value;
+    const conditionValue = document.getElementById("rule-condition-value").value;
+    const actionType = document.getElementById("rule-action-type").value;
+    const actionValue = document.getElementById("rule-action-value").value;
+    const cooldownHours = document.getElementById("rule-cooldown").value;
+
+    try {
+        let condition;
+        switch (conditionType) {
+            case "cycles":
+                condition = { CyclesBelow: BigInt(conditionValue) };
+                break;
+            case "memory":
+                condition = { MemoryUsageAbove: BigInt(conditionValue) };
+                break;
+            case "compute":
+                condition = { ComputeAllocationAbove: Number(conditionValue) };
+                break;
+        }
+
+        let action;
+        switch (actionType) {
+            case "topup":
+                action = { TopUpCycles: BigInt(actionValue) };
+                break;
+            case "notify":
+                action = { NotifyOwner: actionValue.toString() };
+                break;
+            case "compute":
+                action = { AdjustComputeAllocation: Number(actionValue) };
+                break;
+        }
+
+        const cooldownNanos = BigInt(cooldownHours) * BigInt(3600000000000); // Convert hours to nanoseconds
+        console.log("Creating rule with:", {
+            canisterId,
+            condition,
+            action,
+            cooldownNanos
+        });
+
+        const result = await actor.createRule(
+            Principal.fromText(canisterId),
+            condition,
+            action,
+            cooldownNanos
+        );
+
+        console.log("Create rule result:", result);
+
+        if (result.ok) {
+            alert("Rule created successfully!");
+            document.getElementById("create-rule-form").reset();
+            await loadRules();
+        } else {
+            alert("Failed to create rule: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error("Error creating rule:", error);
+        alert("Error creating rule: " + error.message);
+    }
+}
+
+async function toggleRule(ruleId, enabled) {
+    console.log("Toggling rule:", ruleId, "to enabled:", enabled);
+    try {
+        // Pass only the enabled parameter, keeping others as null
+        const result = await actor.updateRule(
+            ruleId,        // ruleId
+            null,          // condition (no change)
+            null,          // action (no change)
+            [enabled],     // enabled (wrapped in array to make it optional)
+            null           // cooldownPeriod (no change)
+        );
+        console.log("Toggle result:", result);
+        
+        if (result.ok) {
+            await loadRules();
+        } else {
+            alert("Failed to update rule: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error("Error updating rule:", error);
+        alert("Error updating rule: " + error.message);
+    }
+}
+
+async function deleteRule(ruleId) {
+    if (!confirm("Are you sure you want to delete this rule?")) {
+        return;
+    }
+
+    try {
+        const result = await actor.deleteRule(ruleId);
+        if (result.ok) {
+            await loadRules();
+        } else {
+            alert("Failed to delete rule: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error("Error deleting rule:", error);
+        alert("Error deleting rule: " + error.message);
+    }
+}
+
+// ICP Balance Management
+async function loadICPBalance() {
+    try {
+        const result = await actor.getICPBalance();
+        if (result.ok) {
+            // Convert from e8s back to ICP for display
+            const icpAmount = Number(result.ok) / 100000000;
+            document.getElementById("icpBalance").textContent = icpAmount.toFixed(8);
+        } else {
+            console.error("Failed to load ICP balance:", result.err);
+        }
+    } catch (error) {
+        console.error("Error loading ICP balance:", error);
+    }
+}
+
+// Add event listeners
+document.getElementById("create-rule-form").onsubmit = createRule;
+
+// Add periodic rule checking
+function startPeriodicRuleCheck() {
+    const ONE_HOUR = 60 * 60 * 1000; // 1 hour in milliseconds
+    
+    async function checkRules() {
+        try {
+            if (!actor) {
+                console.warn("Actor not initialized yet");
+                return;
+            }
+
+            const result = await actor.checkAndExecuteRules();
+            if (result.err) {
+                console.error("Error checking rules:", result.err);
+            }
+            
+            // Refresh rules display
+            await loadRules();
+            await loadICPBalance();
+        } catch (error) {
+            console.error("Error in rule check:", error);
+        }
+    }
+    
+    // Clear any existing interval
+    if (window.ruleCheckInterval) {
+        clearInterval(window.ruleCheckInterval);
+    }
+    
+    // Set up periodic checks
+    window.ruleCheckInterval = setInterval(checkRules, ONE_HOUR);
+    
+    // Run initial check
+    checkRules();
 }
 
 init();
