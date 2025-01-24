@@ -21,6 +21,7 @@ async function init() {
     const logoutButton = document.getElementById("logoutButton");
     const authSection = document.getElementById("auth-section");
     const userSection = document.getElementById("user-section");
+    const logoutSection = document.getElementById("logout-section");
 
     loginButton.onclick = login;
     logoutButton.onclick = logout;
@@ -218,13 +219,16 @@ async function logout() {
 
 function updateUI(isAuthenticated) {
     const authSection = document.getElementById("auth-section");
+    const logoutSection = document.getElementById("logout-section");
     const userSection = document.getElementById("user-section");
     
     if (isAuthenticated) {
         authSection.style.display = "none";
+        logoutSection.style.display = "block";
         userSection.style.display = "block";
     } else {
         authSection.style.display = "block";
+        logoutSection.style.display = "none";
         userSection.style.display = "none";
         document.getElementById("principalId").textContent = "";
     }
