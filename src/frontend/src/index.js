@@ -937,9 +937,10 @@ async function deleteRule(ruleId) {
 
     try {
         const result = await actor.deleteRule(ruleId);
-        if (result.ok) {
+        // The backend returns {ok: null} on success
+        if ('ok' in result) {
             await loadRules();
-        } else {
+        } else if ('err' in result) {
             alert("Failed to delete rule: " + JSON.stringify(result.err));
         }
     } catch (error) {

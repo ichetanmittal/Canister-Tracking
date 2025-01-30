@@ -394,7 +394,7 @@ actor {
             condition = condition;
             action = action;
             enabled = true;
-            lastTriggered = null;
+            lastTriggered = ?Time.now();  // Initialize with current time
             cooldownPeriod = cooldownPeriod;
             owner = caller;
         };
