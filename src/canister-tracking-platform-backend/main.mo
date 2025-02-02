@@ -8,14 +8,19 @@ import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Nat "mo:base/Nat";
 import Int "mo:base/Int";
+import Debug "mo:base/Debug";
 
 actor {
+    // Platform configuration
+    let PLATFORM_CONTROLLER_ID : Principal = Principal.fromText("42xyq-zqaaa-aaaag-at2sq-cai"); // Production/IC network backend canister ID
+
     // Types
     type UserId = Principal;
     type AuthError = {
         #NotAuthenticated;
         #AlreadyExists;
         #NotFound;
+        #ControllerNotAdded;
     };
 
     // Canister Types
@@ -190,13 +195,52 @@ actor {
         return "Hello, " # name # "!";
     };
 
+    // IC Management Canister interface for controller verification
+    private func isControllerAdded(canisterId: Principal) : async Bool {
+        Debug.print("Checking controllers for canister: " # Principal.toText(canisterId));
+        try {
+            let status = await management_canister.canister_status({
+                canister_id = canisterId;
+            });
+            
+            Debug.print("Current controllers:");
+            for (controller in status.settings.controllers.vals()) {
+                Debug.print("  - " # Principal.toText(controller));
+                if (controller == PLATFORM_CONTROLLER_ID) {
+                    Debug.print("✅ Platform controller found!");
+                    return true;
+                };
+            };
+            Debug.print("❌ Platform controller not found");
+            false;
+        } catch (e) {
+            Debug.print("❌ Error checking controllers: " # Error.message(e));
+            false;
+        };
+    };
+
     // Canister Management Methods
     public shared(msg) func registerCanister(canisterId: Principal, name: Text, description: Text) : async Result.Result<(), AuthError> {
         let caller = msg.caller;
+        Debug.print("📝 Registering canister:");
+        Debug.print("  - Canister ID: " # Principal.toText(canisterId));
+        Debug.print("  - Name: " # name);
+        Debug.print("  - Description: " # description);
+        Debug.print("  - Caller: " # Principal.toText(caller));
         
         if (Principal.isAnonymous(caller)) {
+            Debug.print("❌ Anonymous caller rejected");
             return #err(#NotAuthenticated);
         };
+
+        // Verify if platform controller is added
+        Debug.print("🔍 Checking platform controller...");
+        let hasController = await isControllerAdded(canisterId);
+        if (not hasController) {
+            Debug.print("❌ Platform controller not found");
+            return #err(#ControllerNotAdded);
+        };
+        Debug.print("✅ Platform controller verified");
 
         let canisterInfo : CanisterInfo = {
             name = name;

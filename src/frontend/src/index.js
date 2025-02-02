@@ -7,7 +7,7 @@ let authClient;
 let actor;
 
 // Get the canister ID from the environment
-const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || "bkyz2-fmaaa-aaaaa-qaaaq-cai";
+const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || "42xyq-zqaaa-aaaag-at2sq-cai";  // Production/IC network ID
 
 const II_URL = process.env.DFX_NETWORK === "ic" 
     ? "https://identity.ic0.app/#authorize" 
@@ -156,49 +156,101 @@ function displayCanisters(canisters) {
 }
 
 async function registerCanister() {
+    console.group('📝 Canister Registration');
     const canisterId = document.getElementById("canister-id").value.trim();
     const name = document.getElementById("canister-name").value.trim();
     const description = document.getElementById("canister-description").value.trim();
 
+    console.log('Form Data:', {
+        canisterId,
+        name,
+        description
+    });
+
     try {
         // Validate canister ID format
+        console.log('🔍 Validating canister ID format...');
         if (!canisterId.match(/^[a-z0-9-]+$/)) {
+            console.error('❌ Invalid canister ID format');
             alert("Invalid canister ID format. Please enter a valid canister ID.");
+            console.groupEnd();
             return;
         }
+        console.log('✅ Canister ID format is valid');
 
         // Create a Principal from the canister ID string
+        console.log('🔄 Converting canister ID to Principal...');
         const canisterPrincipal = Principal.fromText(canisterId);
+        console.log('✅ Principal created:', canisterPrincipal.toString());
+
+        console.log('🚀 Sending registration request to backend...');
         const result = await actor.registerCanister(canisterPrincipal, name, description);
+        console.log('📬 Received response:', result);
         
         if ('ok' in result) {
+            console.log('✅ Canister registered successfully!');
             alert("Canister registered successfully!");
             
             // Clear the form
             document.getElementById("register-canister-form").reset();
+            console.log('🧹 Form cleared');
             
             // Refresh the list and fetch metrics with retry
+            console.log('🔄 Refreshing canister list...');
             await loadUserCanisters();
             
             // Add a small delay before fetching metrics to ensure canister is registered
+            console.log('⏳ Waiting to fetch initial metrics...');
             setTimeout(async () => {
                 try {
+                    console.log('📊 Fetching initial metrics...');
                     await fetchCanisterMetrics(canisterId);
+                    console.log('✅ Initial metrics fetched');
                 } catch (error) {
-                    console.error("Error fetching initial metrics:", error);
+                    console.error('❌ Error fetching initial metrics:', error);
                 }
             }, 1000);
+        } else if (result.err && 'ControllerNotAdded' in result.err) {
+            console.log('⚠️ Controller not added, showing instructions...');
+            // Show controller addition instructions
+            // Use production controller ID
+            const platformController = "42xyq-zqaaa-aaaag-at2sq-cai";
+            console.log('🔑 Platform Controller ID:', platformController);
+            
+            // For mainnet, include --network ic
+            const command = `dfx canister --network ic update-settings ${canisterId} --add-controller ${platformController}`;
+            console.log('📋 Generated command:', command);
+            
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'alert alert-warning';
+            statusDiv.innerHTML = `
+                <h4>Controller Access Required</h4>
+                <p>To monitor your canister, you need to add our platform as a controller. Run this command in your terminal:</p>
+                <div class="code-block">
+                    <code>${command}</code>
+                    <button onclick="navigator.clipboard.writeText('${command}')">Copy Command</button>
+                </div>
+                <button onclick="retryRegistration('${canisterId}', '${name}', '${description}')">Verify and Continue</button>
+            `;
+            
+            const container = document.getElementById("registration-status");
+            container.innerHTML = '';
+            container.appendChild(statusDiv);
+            return;
         } else {
             alert("Failed to register canister: " + JSON.stringify(result.err));
         }
     } catch (error) {
-        console.error("Error registering canister:", error);
+        console.error('❌ Error registering canister:', error);
         if (error.message.includes("Invalid principal")) {
+            console.error('❌ Invalid principal format');
             alert("Invalid canister ID format. Please check the ID and try again.");
         } else {
+            console.error('❌ Unexpected error:', error.message);
             alert("Error registering canister: " + error.message);
         }
     }
+    console.groupEnd();
 }
 
 // Make editCanister function available globally
@@ -728,9 +780,57 @@ window.depositICP = async function depositICP() {
     }
 }
 
+// Retry registration after controller is added
+async function retryRegistration(canisterId, name, description) {
+    console.group('🔄 Retry Registration');
+    console.log('Parameters:', { canisterId, name, description });
+
+    try {
+        console.log('🔄 Converting canister ID to Principal...');
+        const canisterPrincipal = Principal.fromText(canisterId);
+        console.log('✅ Principal created:', canisterPrincipal.toString());
+
+        console.log('🚀 Sending retry registration request...');
+        const result = await actor.registerCanister(canisterPrincipal, name, description);
+        console.log('📬 Received response:', result);
+        
+        if ('ok' in result) {
+            console.log('✅ Canister registered successfully!');
+            alert("Canister registered successfully!");
+            document.getElementById("registration-status").innerHTML = '';
+            console.log('🔄 Refreshing canister list...');
+            await loadUserCanisters();
+            
+            console.log('⏳ Waiting to fetch initial metrics...');
+            setTimeout(async () => {
+                try {
+                    console.log('📊 Fetching initial metrics...');
+                    await fetchCanisterMetrics(canisterId);
+                    console.log('✅ Initial metrics fetched');
+                } catch (error) {
+                    console.error('❌ Error fetching initial metrics:', error);
+                }
+            }, 1000);
+        } else if (result.err && 'ControllerNotAdded' in result.err) {
+            console.warn('⚠️ Controller still not added');
+            alert("Platform controller not yet added. Please run the command and try again.");
+        } else {
+            console.error('❌ Registration failed:', result.err);
+            alert("Failed to register canister: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error('❌ Error in retry registration:', error);
+        alert("Error retrying registration: " + error.message);
+    }
+    console.groupEnd();
+}
+
+// Make functions available globally
+window.retryRegistration = retryRegistration;
 window.toggleRule = toggleRule;
 window.deleteRule = deleteRule;
 window.refreshMetrics = fetchCanisterMetrics;
+window.registerCanister = registerCanister;
 
 // Add periodic metrics update (every 8 hours)
 function startPeriodicMetricsUpdate() {
