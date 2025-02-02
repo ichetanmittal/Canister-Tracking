@@ -190,6 +190,54 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
 
+        .alert {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid transparent;
+        }
+
+        .alert-warning {
+            background-color: #FEF3C7;
+            border-color: #F59E0B;
+            color: #92400E;
+        }
+
+        .code-block {
+            background-color: #1F2937;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin: 1rem 0;
+            position: relative;
+        }
+
+        .code-block code {
+            color: #E5E7EB;
+            font-family: monospace;
+            display: block;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 0.5rem;
+        }
+
+        .code-block button {
+            background-color: #4B5563;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+
+        .code-block button:hover {
+            background-color: #374151;
+        }
+
+        #registration-status {
+            margin: 1rem 0;
+        }
+
         .time-filter {
             display: flex;
             align-items: center;
@@ -376,7 +424,7 @@
                 <!-- Register New Canister Form -->
                 <div class="form-section">
                     <h4>Register New Canister</h4>
-                    <form id="register-canister-form">
+                    <form id="register-canister-form" onsubmit="event.preventDefault(); registerCanister();">
                         <div class="form-group">
                             <label for="canister-id">Canister ID</label>
                             <input type="text" id="canister-id" required placeholder="Enter canister ID">
@@ -391,6 +439,8 @@
                         </div>
                         <button type="submit" class="primary">Register Canister</button>
                     </form>
+                    <!-- Registration Status Container -->
+                    <div id="registration-status"></div>
                 </div>
 
                 <!-- Canisters List -->
