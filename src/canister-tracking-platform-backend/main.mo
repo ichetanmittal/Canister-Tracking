@@ -233,6 +233,30 @@ actor {
             return #err(#NotAuthenticated);
         };
 
+        // Verify if the caller is a controller of the canister
+        Debug.print("🔍 Checking if caller is a controller...");
+        try {
+            let status = await management_canister.canister_status({
+                canister_id = canisterId;
+            });
+            
+            var isController = false;
+            for (controller in status.settings.controllers.vals()) {
+                if (Principal.equal(controller, caller)) {
+                    isController := true;
+                };
+            };
+            
+            if (not isController) {
+                Debug.print("❌ Caller is not a controller of the canister");
+                return #err(#NotAuthenticated);
+            };
+            Debug.print("✅ Caller verified as controller");
+        } catch (e) {
+            Debug.print("❌ Error checking controllers: " # Error.message(e));
+            return #err(#NotAuthenticated);
+        };
+
         // Verify if platform controller is added
         Debug.print("🔍 Checking platform controller...");
         let hasController = await isControllerAdded(canisterId);
