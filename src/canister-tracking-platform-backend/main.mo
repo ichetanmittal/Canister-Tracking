@@ -220,6 +220,37 @@ actor {
     };
 
     // Canister Management Methods
+    public shared(msg) func unregisterCanister(canisterId : Principal) : async Result.Result<(), AuthError> {
+        let caller = msg.caller;
+        
+        if (Principal.isAnonymous(caller)) {
+            return #err(#NotAuthenticated);
+        };
+
+        // Check if the canister exists and is owned by the caller
+        switch (canisters.get(canisterId)) {
+            case (?info) {
+                if (info.owner != caller) {
+                    return #err(#NotAuthenticated);
+                };
+                // Remove the canister from all data structures
+                canisters.delete(canisterId);
+                metrics.delete(canisterId);
+                
+                // Remove any rules associated with this canister
+                let rulesToDelete = Iter.filter<(Text, Rule)>(rules.entries(), func((_, rule)) {
+                    rule.canisterId != canisterId
+                });
+                rules := HashMap.fromIter<Text, Rule>(rulesToDelete, 10, Text.equal, Text.hash);
+                
+                #ok(())
+            };
+            case null {
+                #err(#NotFound)
+            };
+        }
+    };
+
     public shared(msg) func registerCanister(canisterId: Principal, name: Text, description: Text) : async Result.Result<(), AuthError> {
         let caller = msg.caller;
         Debug.print("📝 Registering canister:");
