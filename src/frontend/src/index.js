@@ -89,22 +89,24 @@ async function handleAuthenticated() {
 
 async function loadUserCanisters() {
     try {
-        console.log("Loading user canisters...");
+        console.log("🔍 Loading user canisters...");
         const result = await actor.listUserCanisters();
-        console.log("User canisters result:", result);
+        console.log("📋 User canisters list result:", result);
         
         if (result.ok) {
+            console.log("✅ Successfully loaded canisters:", result.ok);
             displayCanisters(result.ok);
         } else {
-            console.error("Failed to load canisters:", result.err);
+            console.error("❌ Failed to load canisters:", result.err);
         }
     } catch (error) {
-        console.error("Error loading canisters:", error);
+        console.error("🚨 Error loading canisters:", error);
     }
 }
 
 function displayCanisters(canisters) {
-    console.log("Displaying canisters:", canisters);
+    console.group('📊 Displaying Canisters');
+    console.log("Total canisters to display:", canisters.length);
     const container = document.getElementById("canisters-container");
     const ruleCanisterSelect = document.getElementById("rule-canister");
     
@@ -130,6 +132,7 @@ function displayCanisters(canisters) {
             <p><strong>Description:</strong> ${info.description}</p>
             <p><strong>Created:</strong> ${createdDate.toLocaleDateString()}</p>
             <button onclick='window.editCanister(${JSON.stringify(canisterIdStr)}, ${JSON.stringify(info.name)}, ${JSON.stringify(info.description)})'>Edit</button>
+            <button onclick='window.unregisterCanister(${JSON.stringify(canisterIdStr)})' class="unregister-btn">Unregister</button>
             
             <div class="metrics-container" id="metrics-${canisterIdStr}">
                 <h6>Monitoring Data</h6>
@@ -832,35 +835,57 @@ window.deleteRule = deleteRule;
 window.refreshMetrics = fetchCanisterMetrics;
 window.registerCanister = registerCanister;
 
-// Add periodic metrics update (every 8 hours)
-function startPeriodicMetricsUpdate() {
-    const EIGHT_HOURS = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
-    
-    async function updateAllMetrics() {
-        try {
-            if (!actor) {
-                console.warn("Actor not initialized yet");
-                return;
-            }
+// Add unregister functionality
+async function unregisterCanister(canisterId) {
+    console.group('🗑️ Unregister Canister');
+    console.log('Attempting to unregister canister:', canisterId);
 
-            const result = await actor.listUserCanisters();
-            if (result.ok) {
-                for (const [canisterId] of result.ok) {
-                    await fetchCanisterMetrics(canisterId.toString());
-                }
-            }
-        } catch (error) {
-            console.error("Error updating metrics:", error);
+    // Ask for confirmation
+    if (!confirm(`Are you sure you want to unregister canister ${canisterId}? This action cannot be undone.`)) {
+        console.log('❌ Unregister cancelled by user');
+        console.groupEnd();
+        return;
+    }
+
+    try {
+        console.log('🔄 Sending unregister request to backend...');
+        const canisterPrincipal = Principal.fromText(canisterId);
+        const result = await actor.unregisterCanister(canisterPrincipal);
+        console.log('📬 Received response:', result);
+
+        if ('ok' in result) {
+            console.log('✅ Canister unregistered successfully!');
+            alert('Canister unregistered successfully!');
+            // Refresh the canister list
+            await loadUserCanisters();
+        } else {
+            console.error('❌ Failed to unregister canister:', result.err);
+            alert(`Failed to unregister canister: ${JSON.stringify(result.err)}`);
         }
+    } catch (error) {
+        console.error('🚨 Error unregistering canister:', error);
+        alert('An error occurred while unregistering the canister. Please try again.');
     }
-    
-    // Clear any existing interval
-    if (window.metricsUpdateInterval) {
-        clearInterval(window.metricsUpdateInterval);
+    console.groupEnd();
+}
+
+// Make functions available globally
+window.unregisterCanister = unregisterCanister;
+
+// ICP Balance Management
+async function loadICPBalance() {
+    try {
+        const result = await actor.getICPBalance();
+        if (result.ok) {
+            // Convert from e8s back to ICP for display
+            const icpAmount = Number(result.ok) / 100000000;
+            document.getElementById("icpBalance").textContent = icpAmount.toFixed(8);
+        } else {
+            console.error("Failed to load ICP balance:", result.err);
+        }
+    } catch (error) {
+        console.error("Error loading ICP balance:", error);
     }
-    
-    // Set up periodic updates
-    window.metricsUpdateInterval = setInterval(updateAllMetrics, EIGHT_HOURS);
 }
 
 // Rule Management Functions
@@ -1049,24 +1074,36 @@ async function deleteRule(ruleId) {
     }
 }
 
-// ICP Balance Management
-async function loadICPBalance() {
-    try {
-        const result = await actor.getICPBalance();
-        if (result.ok) {
-            // Convert from e8s back to ICP for display
-            const icpAmount = Number(result.ok) / 100000000;
-            document.getElementById("icpBalance").textContent = icpAmount.toFixed(8);
-        } else {
-            console.error("Failed to load ICP balance:", result.err);
-        }
-    } catch (error) {
-        console.error("Error loading ICP balance:", error);
-    }
-}
+// Add periodic metrics update (every 8 hours)
+function startPeriodicMetricsUpdate() {
+    const EIGHT_HOURS = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+    
+    async function updateAllMetrics() {
+        try {
+            if (!actor) {
+                console.warn("Actor not initialized yet");
+                return;
+            }
 
-// Add event listeners
-document.getElementById("create-rule-form").onsubmit = createRule;
+            const result = await actor.listUserCanisters();
+            if (result.ok) {
+                for (const [canisterId] of result.ok) {
+                    await fetchCanisterMetrics(canisterId.toString());
+                }
+            }
+        } catch (error) {
+            console.error("Error updating metrics:", error);
+        }
+    }
+    
+    // Clear any existing interval
+    if (window.metricsUpdateInterval) {
+        clearInterval(window.metricsUpdateInterval);
+    }
+    
+    // Set up periodic updates
+    window.metricsUpdateInterval = setInterval(updateAllMetrics, EIGHT_HOURS);
+}
 
 // Add periodic rule checking
 function startPeriodicRuleCheck() {
@@ -1088,7 +1125,7 @@ function startPeriodicRuleCheck() {
             await loadRules();
             await loadICPBalance();
         } catch (error) {
-            console.error("Error in rule check:", error);
+        console.error("Error in rule check:", error);
         }
     }
     
