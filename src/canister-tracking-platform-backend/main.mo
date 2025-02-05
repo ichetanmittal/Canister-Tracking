@@ -13,10 +13,10 @@ import Debug "mo:base/Debug";
 actor {
     // Platform configuration
     // Production/IC network backend canister ID
-    // let PLATFORM_CONTROLLER_ID : Principal = Principal.fromText("42xyq-zqaaa-aaaag-at2sq-cai"); 
+    let PLATFORM_CONTROLLER_ID : Principal = Principal.fromText("42xyq-zqaaa-aaaag-at2sq-cai"); 
     
     // Local development backend canister ID (dfx deploy generated)
-    let PLATFORM_CONTROLLER_ID : Principal = Principal.fromText("bkyz2-fmaaa-aaaaa-qaaaq-cai");
+    // let PLATFORM_CONTROLLER_ID : Principal = Principal.fromText("bkyz2-fmaaa-aaaaa-qaaaq-cai");
 
     // Types
     type UserId = Principal;
