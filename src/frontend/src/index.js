@@ -7,7 +7,11 @@ let authClient;
 let actor;
 
 // Get the canister ID from the environment
-const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || "42xyq-zqaaa-aaaag-at2sq-cai";  // Production/IC network ID
+// Production/IC network ID
+// const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || "42xyq-zqaaa-aaaag-at2sq-cai";
+
+// Local development ID (dfx deploy generated)
+const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 
 const II_URL = process.env.DFX_NETWORK === "ic" 
     ? "https://identity.ic0.app/#authorize" 
@@ -215,13 +219,20 @@ async function registerCanister() {
             }, 1000);
         } else if (result.err && 'ControllerNotAdded' in result.err) {
             console.log('⚠️ Controller not added, showing instructions...');
-            // Show controller addition instructions
-            // Use production controller ID
-            const platformController = "42xyq-zqaaa-aaaag-at2sq-cai";
+            // Production controller ID
+            // const platformController = "42xyq-zqaaa-aaaag-at2sq-cai";
+            
+            // Local development controller ID
+            const platformController = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
+            
             console.log('🔑 Platform Controller ID:', platformController);
             
-            // For mainnet, include --network ic
-            const command = `dfx canister --network ic update-settings ${canisterId} --add-controller ${platformController}`;
+            // Production command (commented out)
+            // const command = `dfx canister --network ic update-settings ${canisterId} --add-controller ${platformController}`;
+            
+            // Local development command
+            const command = `dfx canister update-settings ${canisterId} --add-controller ${platformController}`;
+            
             console.log('📋 Generated command:', command);
             
             const statusDiv = document.createElement('div');
@@ -302,16 +313,22 @@ function updateUI(isAuthenticated) {
     const authSection = document.getElementById("auth-section");
     const logoutSection = document.getElementById("logout-section");
     const userSection = document.getElementById("user-section");
+    const preLoginContent = document.getElementById("pre-login-content");
     
     if (isAuthenticated) {
-        authSection.style.display = "none";
-        logoutSection.style.display = "block";
+        // Hide pre-login content
+        preLoginContent.style.display = "none";
+        // Show post-login content
         userSection.style.display = "block";
+        logoutSection.style.display = "block";
+        authSection.style.display = "none";
     } else {
-        authSection.style.display = "block";
-        logoutSection.style.display = "none";
+        // Show pre-login content
+        preLoginContent.style.display = "block";
+        // Hide post-login content
         userSection.style.display = "none";
-        document.getElementById("principalId").textContent = "";
+        logoutSection.style.display = "none";
+        authSection.style.display = "block";
     }
 }
 
