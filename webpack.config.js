@@ -3,6 +3,10 @@ const webpack = require("webpack");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const TerserPlugin = require("terser-webpack-plugin");
 const dfxJson = require("./dfx.json");
+const dotenv = require('dotenv');
+
+// Load environment variables from .env file
+const env = dotenv.config().parsed || {};
 
 // List of all aliases for canisters
 const aliases = Object.entries(dfxJson.canisters).reduce(
@@ -53,6 +57,16 @@ function generateWebpackConfig() {
     output: {
       filename: "[name].js",
       path: path.join(__dirname, "dist", "frontend"),
+      publicPath: "/",
+    },
+    module: {
+      rules: [
+        {
+          test: /\.(js|ts)x?$/,
+          loader: "babel-loader",
+          exclude: /node_modules/,
+        },
+      ],
     },
     plugins: [
       new HtmlWebpackPlugin({
@@ -62,9 +76,11 @@ function generateWebpackConfig() {
         chunks: ["index"],
       }),
       new webpack.EnvironmentPlugin({
-        NODE_ENV: "development",
-        DFX_NETWORK: process.env.DFX_NETWORK || "local",
-        CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND: dfxJson.canisters["canister-tracking-platform-backend"][process.env.DFX_NETWORK || "local"]?.canister_id,
+        NODE_ENV: 'production',
+        CANISTER_ID_INTERNET_IDENTITY: env.CANISTER_ID_INTERNET_IDENTITY || 'rdmx6-jaaaa-aaaaa-aaadq-cai',
+        CANISTER_ID_FRONTEND: env.CANISTER_ID_FRONTEND || '4tutm-pyaaa-aaaag-at2ta-cai',
+        CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND: env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || '42xyq-zqaaa-aaaag-at2sq-cai',
+        DFX_NETWORK: env.DFX_NETWORK || 'ic',
       }),
       new webpack.ProvidePlugin({
         Buffer: [require.resolve("buffer/"), "Buffer"],

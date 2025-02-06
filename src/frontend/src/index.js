@@ -1,6 +1,7 @@
 import { AuthClient } from "@dfinity/auth-client";
 import { Actor, HttpAgent } from "@dfinity/agent";
 import { Principal } from "@dfinity/principal";
+import { AccountIdentifier } from "@dfinity/ledger-icp";
 import { idlFactory } from "../../declarations/canister-tracking-platform-backend/canister-tracking-platform-backend.did.js";
 
 let authClient;
@@ -13,82 +14,126 @@ const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND ||
 // Local development ID (dfx deploy generated)
 // const canisterId = process.env.CANISTER_ID_CANISTER_TRACKING_PLATFORM_BACKEND || "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 
-const II_URL = process.env.DFX_NETWORK === "ic" 
-    ? "https://identity.ic0.app/#authorize" 
-    : `http://be2us-64aaa-aaaaa-qaabq-cai.localhost:8000/#authorize`;
+// Internet Identity URL
+const II_URL = "https://identity.ic0.app";
 
 async function init() {
-    authClient = await AuthClient.create();
-    const isAuthenticated = await authClient.isAuthenticated();
+    try {
+        authClient = await AuthClient.create();
+        const isAuthenticated = await authClient.isAuthenticated();
 
-    const loginButton = document.getElementById("loginButton");
-    const logoutButton = document.getElementById("logoutButton");
-    const authSection = document.getElementById("auth-section");
-    const userSection = document.getElementById("user-section");
-    const logoutSection = document.getElementById("logout-section");
+        const loginButton = document.getElementById("loginButton");
+        const logoutButton = document.getElementById("logoutButton");
+        const authSection = document.getElementById("auth-section");
+        const userSection = document.getElementById("user-section");
+        const logoutSection = document.getElementById("logout-section");
 
-    loginButton.onclick = login;
-    logoutButton.onclick = logout;
+        loginButton.onclick = login;
+        logoutButton.onclick = logout;
 
-    if (isAuthenticated) {
-        await handleAuthenticated();
+        if (isAuthenticated) {
+            await handleAuthenticated();
+        }
+
+        updateUI(isAuthenticated);
+    } catch (error) {
+        console.error("Init error:", error);
     }
-
-    updateUI(isAuthenticated);
 }
 
 async function login() {
-    const days = BigInt(1);
-    const hours = BigInt(24);
-    const nanoseconds = BigInt(3600000000000);
+    try {
+        const days = BigInt(1);
+        const hours = BigInt(24);
+        const nanoseconds = BigInt(3600000000000);
 
-    await authClient.login({
-        identityProvider: II_URL,
-        maxTimeToLive: days * hours * nanoseconds,
-        onSuccess: async () => {
-            await handleAuthenticated();
-            window.location.reload(); // Reload the page after successful authentication
-        },
-    });
+        await authClient.login({
+            identityProvider: II_URL,
+            maxTimeToLive: days * hours * nanoseconds,
+            onSuccess: async () => {
+                try {
+                    await handleAuthenticated();
+                } catch (error) {
+                    console.error("Handle authenticated error:", error);
+                }
+            },
+            onError: (error) => {
+                console.error("Login error:", error);
+            }
+        });
+    } catch (error) {
+        console.error("Login function error:", error);
+    }
 }
 
 async function handleAuthenticated() {
-    const identity = authClient.getIdentity();
-    const agent = new HttpAgent({ identity });
-    
-    // When deploying to IC, remove this line
-    if (process.env.DFX_NETWORK !== "ic") {
-        await agent.fetchRootKey();
+    try {
+        const identity = authClient.getIdentity();
+        const agent = new HttpAgent({ 
+            identity,
+            host: "https://ic0.app"
+        });
+
+        // Create actor with the new identity
+        actor = Actor.createActor(idlFactory, {
+            agent,
+            canisterId: canisterId,
+        });
+
+        // Display user's principal ID
+        const principal = identity.getPrincipal();
+        const principalElement = document.getElementById("principalId");
+        if (principalElement) {
+            principalElement.textContent = principal.toString();
+        }
+        
+        // Convert principal to account ID using AccountIdentifier
+        try {
+            // Create a new AccountIdentifier directly from the principal
+            const accountId = AccountIdentifier.fromPrincipal({
+                principal: principal,
+            }).toHex();
+            
+            const accountElement = document.getElementById("accountId");
+            if (accountElement) {
+                accountElement.textContent = accountId;
+            }
+        } catch (error) {
+            console.error("Error generating account ID:", error);
+            const accountElement = document.getElementById("accountId");
+            if (accountElement) {
+                accountElement.textContent = "Error generating account ID";
+            }
+        }
+
+        // Load user data
+        await Promise.all([
+            loadUserCanisters(),
+            loadRules(),
+            loadICPBalance()
+        ]);
+
+        startPeriodicMetricsUpdate();
+
+        // Set up form handlers
+        const registerForm = document.getElementById("register-canister-form");
+        if (registerForm) {
+            registerForm.onsubmit = async (e) => {
+                e.preventDefault();
+                await registerCanister();
+            };
+        }
+
+        // Start periodic rule checking
+        startPeriodicRuleCheck();
+
+        // Update UI after successful authentication
+        updateUI(true);
+    } catch (error) {
+        console.error("Handle authenticated error:", error);
+        // If there's an error, update UI to show login state
+        updateUI(false);
     }
-
-    // Create actor with the new identity
-    actor = Actor.createActor(idlFactory, {
-        agent,
-        canisterId: canisterId,
-    });
-
-    // Display user's principal ID
-    const principal = identity.getPrincipal();
-    document.getElementById("principalId").textContent = principal.toString();
-
-    // Load user data
-    await Promise.all([
-        loadUserCanisters(),
-        loadRules(),
-        loadICPBalance()
-    ]);
-
-    startPeriodicMetricsUpdate();
-
-    // Set up form handlers
-    const registerForm = document.getElementById("register-canister-form");
-    registerForm.onsubmit = async (e) => {
-        e.preventDefault();
-        await registerCanister();
-    };
-
-    // Start periodic rule checking
-    startPeriodicRuleCheck();
 }
 
 async function loadUserCanisters() {
