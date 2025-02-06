@@ -7,6 +7,7 @@ import Option "mo:base/Option";
 import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Nat "mo:base/Nat";
+import Nat64 "mo:base/Nat64";
 import Int "mo:base/Int";
 import Debug "mo:base/Debug";
 
@@ -133,6 +134,25 @@ actor {
     // User ICP balances for automatic top-ups
     private stable var userBalances : [(Principal, Nat)] = [];
     private var balances = HashMap.HashMap<Principal, Nat>(10, Principal.equal, Principal.hash);
+
+    // ICP Ledger interface
+    let ICP_LEDGER_CANISTER_ID : Principal = Principal.fromText("ryjl3-tyaaa-aaaaa-aaaba-cai");
+
+    type AccountIdentifier = Blob;
+    type Tokens = {
+        e8s : Nat64;
+    };
+
+    type Account = {
+        owner : Principal;
+        subaccount : ?[Nat8];
+    };
+
+    type AccountIdText = Text;
+
+    let ledger : actor {
+        icrc1_balance_of : shared query { owner : Principal; subaccount : ?[Nat8] } -> async Nat;
+    } = actor(Principal.toText(ICP_LEDGER_CANISTER_ID));
 
     // Initialize state
     system func preupgrade() {
@@ -555,17 +575,8 @@ actor {
     };
 
     // ICP balance management
-    public shared(msg) func depositICP(amount: Nat) : async Result.Result<(), RuleError> {
-        let caller = msg.caller;
-        
-        if (Principal.isAnonymous(caller)) {
-            return #err(#NotAuthorized);
-        };
-
-        let currentBalance = Option.get(balances.get(caller), 0);
-        balances.put(caller, currentBalance + amount);
-        #ok(())
-    };
+    // 
+    
 
     public shared query(msg) func getICPBalance() : async Result.Result<Nat, RuleError> {
         let caller = msg.caller;
@@ -575,6 +586,16 @@ actor {
         };
 
         #ok(Option.get(balances.get(caller), 0))
+    };
+
+    // Get actual ICP balance from ledger
+    public shared(msg) func getAccountBalance(owner: Principal) : async Result.Result<Nat64, Text> {
+        try {
+            let balance = await ledger.icrc1_balance_of({ owner = owner; subaccount = null });
+            #ok(Nat64.fromNat(balance))
+        } catch (e) {
+            #err("Failed to fetch balance: " # Error.message(e))
+        }
     };
 
     // Rule evaluation and execution

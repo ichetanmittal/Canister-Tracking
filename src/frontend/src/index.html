@@ -534,6 +534,26 @@
                 font-size: 1.25rem;
             }
         }
+
+        .user-info {
+            margin-top: 1rem;
+        }
+
+        .user-info p {
+            margin: 0.5rem 0;
+            word-break: break-all;
+        }
+
+        .user-info strong {
+            color: var(--text-primary);
+            display: inline-block;
+            min-width: 120px;
+        }
+
+        #accountBalance {
+            color: var(--primary-color);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -582,8 +602,11 @@
             <!-- Welcome card -->
             <div class="card">
                 <h2>Welcome <span id="username"></span>!</h2>
-                <p>Principal ID: <span id="principalId" class="text-secondary"></span></p>
-                <p>Account ID: <span id="accountId" class="text-secondary"></span></p>
+                <div class="user-info">
+                    <p><strong>Principal ID:</strong> <span id="principalId" class="text-secondary"></span></p>
+                    <p><strong>Account ID:</strong> <span id="accountId" class="text-secondary"></span></p>
+                    <p><strong>Account Balance:</strong> <span id="accountBalance">Loading...</span></p>
+                </div>
             </div>
             
             <!-- Canister Management Section -->
@@ -652,7 +675,7 @@
                     <h3>Automated Rules</h3>
                     
                     <!-- ICP Balance Management -->
-                    <div class="card">
+                    <!-- <div class="card">
                         <h4>ICP Balance</h4>
                         <p>Current Balance: <span id="icpBalance">0</span> ICP</p>
                         <div class="form-group">
@@ -660,7 +683,7 @@
                             <input type="number" id="deposit-amount" min="0" step="0.01" placeholder="Enter amount">
                             <button onclick="depositICP()" class="primary">Deposit ICP</button>
                         </div>
-                    </div>
+                    </div> -->
 
                     <!-- Create Rule Form -->
                     <div class="card">
