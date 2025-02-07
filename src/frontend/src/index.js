@@ -98,8 +98,21 @@ async function handleAuthenticated() {
             if (accountElement) {
                 accountElement.textContent = accountId;
             }
+
+            // Fetch and display account balance
+            const balanceResult = await actor.getAccountBalance(principal);
+            if ('ok' in balanceResult) {
+                const balanceE8s = Number(balanceResult.ok);
+                const balanceICP = balanceE8s / 100000000; // Convert from e8s to ICP
+                const balanceElement = document.getElementById("accountBalance");
+                if (balanceElement) {
+                    balanceElement.textContent = `${balanceICP.toFixed(8)} ICP`;
+                }
+            } else {
+                console.error("Failed to fetch balance:", balanceResult.err);
+            }
         } catch (error) {
-            console.error("Error generating account ID:", error);
+            console.error("Error generating account ID or fetching balance:", error);
             const accountElement = document.getElementById("accountId");
             if (accountElement) {
                 accountElement.textContent = "Error generating account ID";
@@ -109,8 +122,7 @@ async function handleAuthenticated() {
         // Load user data
         await Promise.all([
             loadUserCanisters(),
-            loadRules(),
-            loadICPBalance()
+            loadRules()
         ]);
 
         startPeriodicMetricsUpdate();
@@ -809,41 +821,41 @@ function formatNumber(num) {
     return new Intl.NumberFormat().format(Number(num));
 }
 
-// Make functions available globally
-window.depositICP = async function depositICP() {
-    const amount = document.getElementById("deposit-amount").value;
-    console.log("Attempting to deposit:", amount, "ICP");
+// // Make functions available globally
+// window.depositICP = async function depositICP() {
+//     const amount = document.getElementById("deposit-amount").value;
+//     console.log("Attempting to deposit:", amount, "ICP");
     
-    if (!amount || amount <= 0) {
-        alert("Please enter a valid amount");
-        return;
-    }
+//     if (!amount || amount <= 0) {
+//         alert("Please enter a valid amount");
+//         return;
+//     }
 
-    try {
-        // Convert amount to BigInt e8s
-        const amountE8s = BigInt(Math.floor(amount * 100000000));
-        const result = await actor.depositICP(amountE8s);
+//     try {
+//         // Convert amount to BigInt e8s
+//         const amountE8s = BigInt(Math.floor(amount * 100000000));
+//         const result = await actor.depositICP(amountE8s);
         
-        if ('ok' in result) {
-            console.log("Deposit successful");
-            document.getElementById("deposit-amount").value = "";
-            await loadICPBalance();
-            alert("ICP deposited successfully!");
-        } else if ('err' in result) {
-            console.error("Deposit failed with error:", result.err);
-            alert("Failed to deposit ICP: " + JSON.stringify(result.err));
-        }
-    } catch (error) {
-        console.error("Error during deposit:", error);
-        // Only show error if it's not related to response parsing
-        if (!error.message.includes("JSON") && !error.message.includes("parse")) {
-            alert("Error depositing ICP: " + error.message);
-        } else {
-            console.log("Deposit may have succeeded, refreshing balance...");
-            await loadICPBalance();
-        }
-    }
-}
+//         if ('ok' in result) {
+//             console.log("Deposit successful");
+//             document.getElementById("deposit-amount").value = "";
+//             await loadICPBalance();
+//             alert("ICP deposited successfully!");
+//         } else if ('err' in result) {
+//             console.error("Deposit failed with error:", result.err);
+//             alert("Failed to deposit ICP: " + JSON.stringify(result.err));
+//         }
+//     } catch (error) {
+//         console.error("Error during deposit:", error);
+//         // Only show error if it's not related to response parsing
+//         if (!error.message.includes("JSON") && !error.message.includes("parse")) {
+//             alert("Error depositing ICP: " + error.message);
+//         } else {
+//             console.log("Deposit may have succeeded, refreshing balance...");
+//             await loadICPBalance();
+//         }
+//     }
+// }
 
 // Retry registration after controller is added
 async function retryRegistration(canisterId, name, description) {
@@ -933,22 +945,6 @@ async function unregisterCanister(canisterId) {
 
 // Make functions available globally
 window.unregisterCanister = unregisterCanister;
-
-// ICP Balance Management
-async function loadICPBalance() {
-    try {
-        const result = await actor.getICPBalance();
-        if (result.ok) {
-            // Convert from e8s back to ICP for display
-            const icpAmount = Number(result.ok) / 100000000;
-            document.getElementById("icpBalance").textContent = icpAmount.toFixed(8);
-        } else {
-            console.error("Failed to load ICP balance:", result.err);
-        }
-    } catch (error) {
-        console.error("Error loading ICP balance:", error);
-    }
-}
 
 // Rule Management Functions
 async function loadRules() {
@@ -1185,7 +1181,6 @@ function startPeriodicRuleCheck() {
             
             // Refresh rules display
             await loadRules();
-            await loadICPBalance();
         } catch (error) {
         console.error("Error in rule check:", error);
         }
