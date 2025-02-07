@@ -192,16 +192,83 @@
         }
 
         .alert {
-            padding: 1rem;
-            margin-bottom: 1rem;
-            border-radius: 0.5rem;
+            padding: 15px;
+            margin-bottom: 20px;
             border: 1px solid transparent;
+            border-radius: 4px;
         }
-
-        .alert-warning {
-            background-color: #FEF3C7;
-            border-color: #F59E0B;
-            color: #92400E;
+        
+        .alert-success {
+            color: #155724;
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        
+        .alert-danger {
+            color: #721c24;
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        
+        .alert-info {
+            color: #0c5460;
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+        }
+        
+        .close {
+            float: right;
+            font-size: 1.5rem;
+            font-weight: 700;
+            line-height: 1;
+            color: #000;
+            text-shadow: 0 1px 0 #fff;
+            opacity: .5;
+            background: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+        }
+        
+        .rules-section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-control {
+            display: block;
+            width: 100%;
+            padding: 0.375rem 0.75rem;
+            font-size: 1rem;
+            line-height: 1.5;
+            color: #495057;
+            background-color: #fff;
+            border: 1px solid #ced4da;
+            border-radius: 0.25rem;
+        }
+        
+        .btn {
+            display: inline-block;
+            font-weight: 400;
+            text-align: center;
+            vertical-align: middle;
+            cursor: pointer;
+            padding: 0.375rem 0.75rem;
+            font-size: 1rem;
+            line-height: 1.5;
+            border-radius: 0.25rem;
+        }
+        
+        .btn-primary {
+            color: #fff;
+            background-color: #007bff;
+            border-color: #007bff;
         }
 
         .code-block {
@@ -591,6 +658,11 @@
 
         <!-- Post-login content -->
         <div id="user-section" style="display: none;">
+            <!-- Add these new containers after the existing content -->
+            <div id="error-container"></div>
+            <div id="success-container"></div>
+            <div id="rule-execution-status"></div>
+
             <!-- Header with title and logout -->
             <div class="header">
                 <h1>Canister Tracking Platform</h1>
@@ -671,32 +743,24 @@
                 </div>
 
                 <!-- Rule Management Section -->
-                <div id="rules-section" class="form-section">
+                <div id="rules-section" class="rules-section">
                     <h3>Automated Rules</h3>
+                    <button onclick="checkRules()" class="btn btn-primary">Check Rules Now</button>
                     
-                    <!-- ICP Balance Management -->
-                    <!-- <div class="card">
-                        <h4>ICP Balance</h4>
-                        <p>Current Balance: <span id="icpBalance">0</span> ICP</p>
-                        <div class="form-group">
-                            <label for="deposit-amount">Deposit Amount (ICP)</label>
-                            <input type="number" id="deposit-amount" min="0" step="0.01" placeholder="Enter amount">
-                            <button onclick="depositICP()" class="primary">Deposit ICP</button>
-                        </div>
-                    </div> -->
-
                     <!-- Create Rule Form -->
                     <div class="card">
                         <h4>Create New Rule</h4>
                         <form id="create-rule-form">
                             <div class="form-group">
-                                <label for="rule-canister">Canister</label>
-                                <select id="rule-canister" required></select>
+                                <label for="rule-canister">Select Canister:</label>
+                                <select id="rule-canister" class="form-control" required>
+                                    <option value="">Select a canister</option>
+                                </select>
                             </div>
                             
                             <div class="form-group">
-                                <label for="rule-condition-type">Condition Type</label>
-                                <select id="rule-condition-type" required>
+                                <label for="rule-condition-type">Condition Type:</label>
+                                <select id="rule-condition-type" class="form-control" required>
                                     <option value="cycles">Cycles Below</option>
                                     <option value="memory">Memory Usage Above</option>
                                     <option value="compute">Compute Allocation Above</option>
@@ -704,13 +768,14 @@
                             </div>
                             
                             <div class="form-group">
-                                <label for="rule-condition-value">Threshold Value</label>
-                                <input type="number" id="rule-condition-value" required min="0">
+                                <label for="rule-condition-value">Condition Value:</label>
+                                <input type="number" id="rule-condition-value" class="form-control" required
+                                    placeholder="Enter threshold value">
                             </div>
                             
                             <div class="form-group">
-                                <label for="rule-action-type">Action</label>
-                                <select id="rule-action-type" required>
+                                <label for="rule-action-type">Action Type:</label>
+                                <select id="rule-action-type" class="form-control" required>
                                     <option value="topup">Top Up Cycles</option>
                                     <option value="notify">Send Notification</option>
                                     <option value="compute">Adjust Compute Allocation</option>
@@ -718,16 +783,18 @@
                             </div>
                             
                             <div class="form-group">
-                                <label for="rule-action-value">Action Value</label>
-                                <input type="number" id="rule-action-value" required min="0">
+                                <label for="rule-action-value">Action Value:</label>
+                                <input type="text" id="rule-action-value" class="form-control" required
+                                    placeholder="Enter action value">
                             </div>
                             
                             <div class="form-group">
-                                <label for="rule-cooldown">Cooldown Period (hours)</label>
-                                <input type="number" id="rule-cooldown" required min="1" value="24">
+                                <label for="rule-cooldown">Cooldown Period (hours):</label>
+                                <input type="number" id="rule-cooldown" class="form-control" required
+                                    placeholder="Enter cooldown period in hours" min="1" value="24">
                             </div>
                             
-                            <button type="submit" class="primary">Create Rule</button>
+                            <button type="submit" class="btn btn-primary">Create Rule</button>
                         </form>
                     </div>
 
