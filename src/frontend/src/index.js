@@ -1062,7 +1062,9 @@ async function createRule(event) {
                 break;
         }
 
-        const cooldownNanos = BigInt(cooldownHours) * BigInt(3600000000000); // Convert hours to nanoseconds
+        const hoursInNanos = 3600000000000; // 1 hour in nanoseconds
+        const cooldownNanos = BigInt(Math.floor(Number(cooldownHours) * hoursInNanos));
+
         console.log("Creating rule with:", {
             canisterId,
             condition,
@@ -1325,7 +1327,8 @@ document.getElementById('create-rule-form').onsubmit = async function(event) {
                 throw new Error("Invalid action type");
         }
 
-        const cooldownNanos = BigInt(cooldownHours) * BigInt(3600000000000); // Convert hours to nanoseconds
+        const hoursInNanos = 3600000000000; // 1 hour in nanoseconds
+        const cooldownNanos = BigInt(Math.floor(Number(cooldownHours) * hoursInNanos));
         
         console.log('Creating rule with processed data:', {
             canisterId,

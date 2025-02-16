@@ -10,6 +10,7 @@ import Nat "mo:base/Nat";
 import Nat64 "mo:base/Nat64";
 import Int "mo:base/Int";
 import Debug "mo:base/Debug";
+import Cycles "mo:base/ExperimentalCycles";
 
 actor {
     // Platform configuration
@@ -59,9 +60,14 @@ actor {
         cycles : Nat;
     };
 
+    type IC = actor {
+        deposit_cycles : { canister_id : Principal } -> async ();
+    };
+
     let management_canister : actor {
         canister_status : { canister_id : Principal } -> async CanisterStatus;
-    } = actor "aaaaa-aa";
+        deposit_cycles : { canister_id : Principal } -> async ();
+    } = actor("aaaaa-aa");
 
     // New types for monitoring
     type CanisterMetrics = {
@@ -169,17 +175,6 @@ actor {
         transfer : shared TransferArgs -> async Nat64;
     } = actor(Principal.toText(ICP_LEDGER_CANISTER_ID));
 
-    // Cycles wallet interface
-    type WalletResult = {
-        #Ok : Nat;
-        #Err : Text;
-    };
-
-    type CyclesWallet = actor {
-        wallet_receive : shared () -> async WalletResult;
-        wallet_balance : shared query () -> async Nat;
-    };
-
     // Function to convert ICP to cycles with improved precision
     private func convertICPToCycles(icpE8s: Nat) : Nat {
         // Convert ICP (in e8s) to cycles
@@ -187,37 +182,53 @@ actor {
         return (icpE8s * ICP_CYCLES_CONVERSION_RATE) / 100_000_000;
     };
 
-    // Function to perform top-up with improved error handling
+    // Cycles wallet interface
+    let wallet_actor : actor {
+        wallet_send : { canister : Principal; amount : Nat64 } -> async Result.Result<Nat64, Text>;
+    } = actor("yfalt-gaaaa-aaaag-at2lq-cai");
+
     private func performTopUp(canisterId: Principal, cyclesAmount: Nat) : async Result.Result<Nat, Text> {
         Debug.print("🔄 Starting top-up process for canister: " # Principal.toText(canisterId));
         Debug.print("💰 Cycles amount requested: " # Nat.toText(cyclesAmount));
 
         try {
-            // Verify if we have enough ICP balance first
-            let icpRequired = (cyclesAmount * 100_000_000) / ICP_CYCLES_CONVERSION_RATE;
-            Debug.print("💱 ICP required for top-up: " # Nat.toText(icpRequired) # " e8s");
+            // Get current cycles balance
+            let status = await management_canister.canister_status({ canister_id = canisterId });
+            let currentCycles = status.cycles;
+            Debug.print("📊 Current canister cycles: " # Nat.toText(currentCycles));
 
-            // Get canister as cycles wallet
-            let canister = actor(Principal.toText(canisterId)) : CyclesWallet;
+            // Check our own cycles balance
+            let ourBalance = Cycles.balance();
+            Debug.print("💰 Our cycles balance: " # Nat.toText(ourBalance));
             
-            // Check current balance
-            let currentBalance = await canister.wallet_balance();
-            Debug.print("📊 Current canister balance: " # Nat.toText(currentBalance));
-
-            // Perform the top-up
-            let result = await canister.wallet_receive();
-            
-            switch(result) {
-                case (#Ok(amount)) {
-                    Debug.print("✅ Top-up successful! Amount: " # Nat.toText(amount));
-                    Debug.print("📈 New balance should be: " # Nat.toText(currentBalance + amount));
-                    #ok(amount)
-                };
-                case (#Err(error)) {
-                    Debug.print("❌ Top-up failed: " # error);
-                    #err("Top-up failed: " # error)
-                };
+            if (ourBalance < cyclesAmount) {
+                Debug.print("❌ Insufficient cycles balance: " # Nat.toText(ourBalance) # " < " # Nat.toText(cyclesAmount));
+                return #err("Insufficient cycles balance");
             };
+
+            // Add cycles to the message
+            Debug.print("💸 Adding cycles to message: " # Nat.toText(cyclesAmount));
+            Cycles.add(cyclesAmount);
+            
+            // Deposit cycles to the target canister
+            Debug.print("🔄 Depositing cycles...");
+            let ic : IC = actor("aaaaa-aa");
+            await ic.deposit_cycles({ canister_id = canisterId });
+            
+            // Get updated cycles balance
+            let newStatus = await management_canister.canister_status({ canister_id = canisterId });
+            let newCycles = newStatus.cycles;
+            
+            // Check if cycles were actually added
+            if (newCycles <= currentCycles) {
+                Debug.print("❌ Cycles were not added. Old balance: " # Nat.toText(currentCycles) # ", New balance: " # Nat.toText(newCycles));
+                return #err("Cycles were not added to the canister");
+            };
+            
+            let cyclesAdded = newCycles - currentCycles;
+            Debug.print("✅ Top-up successful! Cycles added: " # Nat.toText(cyclesAdded));
+            Debug.print("📈 New balance: " # Nat.toText(newCycles));
+            #ok(cyclesAdded)
         } catch (e) {
             Debug.print("❌ Error during top-up: " # Error.message(e));
             #err("Error during top-up: " # Error.message(e))
