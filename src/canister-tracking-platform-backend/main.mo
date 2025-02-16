@@ -10,6 +10,7 @@ import Nat "mo:base/Nat";
 import Nat64 "mo:base/Nat64";
 import Int "mo:base/Int";
 import Debug "mo:base/Debug";
+import Cycles "mo:base/ExperimentalCycles";
 
 actor {
     // Platform configuration
@@ -59,9 +60,14 @@ actor {
         cycles : Nat;
     };
 
+    type IC = actor {
+        deposit_cycles : { canister_id : Principal } -> async ();
+    };
+
     let management_canister : actor {
         canister_status : { canister_id : Principal } -> async CanisterStatus;
-    } = actor "aaaaa-aa";
+        deposit_cycles : { canister_id : Principal } -> async ();
+    } = actor("aaaaa-aa");
 
     // New types for monitoring
     type CanisterMetrics = {
@@ -150,9 +156,84 @@ actor {
 
     type AccountIdText = Text;
 
+    // Constants for ICP/Cycles conversion
+    let ICP_CYCLES_CONVERSION_RATE : Nat = 5_300_000_000_000; // 1 ICP = 5.3T cycles (current rate)
+    let MIN_ICP_FOR_CONVERSION : Nat = 100_000; // Minimum ICP required for conversion (in e8s)
+
+    // Extended ledger interface
+    type TransferArgs = {
+        memo: Nat64;
+        amount: { e8s: Nat64 };
+        fee: { e8s: Nat64 };
+        from_subaccount: ?[Nat8];
+        to: AccountIdentifier;
+        created_at_time: ?{ timestamp_nanos: Nat64 };
+    };
+
     let ledger : actor {
         icrc1_balance_of : shared query { owner : Principal; subaccount : ?[Nat8] } -> async Nat;
+        transfer : shared TransferArgs -> async Nat64;
     } = actor(Principal.toText(ICP_LEDGER_CANISTER_ID));
+
+    // Function to convert ICP to cycles with improved precision
+    private func convertICPToCycles(icpE8s: Nat) : Nat {
+        // Convert ICP (in e8s) to cycles
+        // 1 ICP = 100_000_000 e8s = 5.3T cycles
+        return (icpE8s * ICP_CYCLES_CONVERSION_RATE) / 100_000_000;
+    };
+
+    // Cycles wallet interface
+    let wallet_actor : actor {
+        wallet_send : { canister : Principal; amount : Nat64 } -> async Result.Result<Nat64, Text>;
+    } = actor("yfalt-gaaaa-aaaag-at2lq-cai");
+
+    private func performTopUp(canisterId: Principal, cyclesAmount: Nat) : async Result.Result<Nat, Text> {
+        Debug.print("🔄 Starting top-up process for canister: " # Principal.toText(canisterId));
+        Debug.print("💰 Cycles amount requested: " # Nat.toText(cyclesAmount));
+
+        try {
+            // Get current cycles balance
+            let status = await management_canister.canister_status({ canister_id = canisterId });
+            let currentCycles = status.cycles;
+            Debug.print("📊 Current canister cycles: " # Nat.toText(currentCycles));
+
+            // Check our own cycles balance
+            let ourBalance = Cycles.balance();
+            Debug.print("💰 Our cycles balance: " # Nat.toText(ourBalance));
+            
+            if (ourBalance < cyclesAmount) {
+                Debug.print("❌ Insufficient cycles balance: " # Nat.toText(ourBalance) # " < " # Nat.toText(cyclesAmount));
+                return #err("Insufficient cycles balance");
+            };
+
+            // Add cycles to the message
+            Debug.print("💸 Adding cycles to message: " # Nat.toText(cyclesAmount));
+            Cycles.add(cyclesAmount);
+            
+            // Deposit cycles to the target canister
+            Debug.print("🔄 Depositing cycles...");
+            let ic : IC = actor("aaaaa-aa");
+            await ic.deposit_cycles({ canister_id = canisterId });
+            
+            // Get updated cycles balance
+            let newStatus = await management_canister.canister_status({ canister_id = canisterId });
+            let newCycles = newStatus.cycles;
+            
+            // Check if cycles were actually added
+            if (newCycles <= currentCycles) {
+                Debug.print("❌ Cycles were not added. Old balance: " # Nat.toText(currentCycles) # ", New balance: " # Nat.toText(newCycles));
+                return #err("Cycles were not added to the canister");
+            };
+            
+            let cyclesAdded = newCycles - currentCycles;
+            Debug.print("✅ Top-up successful! Cycles added: " # Nat.toText(cyclesAdded));
+            Debug.print("📈 New balance: " # Nat.toText(newCycles));
+            #ok(cyclesAdded)
+        } catch (e) {
+            Debug.print("❌ Error during top-up: " # Error.message(e));
+            #err("Error during top-up: " # Error.message(e))
+        };
+    };
 
     // Initialize state
     system func preupgrade() {
@@ -375,20 +456,26 @@ actor {
 
     // Update monitoring methods
     public shared(msg) func updateCanisterMetrics(canisterId: Principal) : async Result.Result<(), MonitoringError> {
+        Debug.print("📊 Starting metrics update for canister: " # Principal.toText(canisterId));
         let caller = msg.caller;
         
         if (Principal.isAnonymous(caller)) {
+            Debug.print("❌ Anonymous caller rejected");
             return #err(#NotAuthorized);
         };
 
         switch (canisters.get(canisterId)) {
             case (?info) {
                 if (not Principal.equal(info.owner, caller)) {
+                    Debug.print("❌ Unauthorized caller");
                     return #err(#NotAuthorized);
                 };
                 
                 try {
+                    Debug.print("🔍 Fetching canister status...");
                     let status = await management_canister.canister_status({ canister_id = canisterId });
+                    Debug.print("💰 Current cycles: " # Nat.toText(status.cycles));
+                    Debug.print("💾 Memory size: " # Nat.toText(status.memory_size));
                     
                     let metricData : CanisterMetrics = {
                         memorySize = status.memory_size;
@@ -402,19 +489,22 @@ actor {
                         };
                         computeAllocation = status.settings.compute_allocation;
                         freezingThreshold = status.settings.freezing_threshold;
-                        createdAt = info.createdAt;  // Use the creation time from CanisterInfo
-                        subnetId = null;  // This will be updated when we get subnet info
-                        storageUtilization = status.memory_size;  // For now, use memory size as storage utilization
+                        createdAt = info.createdAt;
+                        subnetId = null;
+                        storageUtilization = status.memory_size;
                         lastUpdated = Time.now();
                     };
 
                     metrics.put(canisterId, metricData);
+                    Debug.print("✅ Metrics updated successfully");
                     #ok(())
                 } catch (e) {
+                    Debug.print("❌ Error updating metrics: " # Error.message(e));
                     #err(#UpdateFailed)
                 };
             };
             case null {
+                Debug.print("❌ Canister not found");
                 #err(#CanisterNotFound)
             };
         }
@@ -629,53 +719,129 @@ actor {
     };
 
     // This method should be called periodically to check and execute rules
-    public shared(msg) func checkAndExecuteRules() : async Result.Result<(), RuleError> {
+    public shared(msg) func checkAndExecuteRules() : async Result.Result<Text, RuleError> {
+        Debug.print("🔍 Starting rule check execution");
         let caller = msg.caller;
         
         if (Principal.isAnonymous(caller)) {
+            Debug.print("❌ Anonymous caller rejected");
             return #err(#NotAuthorized);
         };
 
-        for ((_, rule) in rules.entries()) {
-            if (Principal.equal(rule.owner, caller)) {
-                switch (metrics.get(rule.canisterId)) {
-                    case (?canisterMetrics) {
-                        if (evaluateRule(rule, canisterMetrics)) {
-                            // Execute action based on rule type
-                            switch (rule.action) {
-                                case (#TopUpCycles(amount)) {
-                                    // Here you would implement the actual top-up logic
-                                    // This would involve converting ICP to cycles and transferring them
-                                    // For now, we'll just update the last triggered time
-                                    let updatedRule = {
-                                        rule with
-                                        lastTriggered = ?Time.now()
-                                    };
-                                    rules.put(rule.id, updatedRule);
-                                };
-                                case (#NotifyOwner(_)) {
-                                    // Implement notification logic here
-                                    let updatedRule = {
-                                        rule with
-                                        lastTriggered = ?Time.now()
-                                    };
-                                    rules.put(rule.id, updatedRule);
-                                };
-                                case (#AdjustComputeAllocation(newAllocation)) {
-                                    // Implement compute allocation adjustment logic here
-                                    let updatedRule = {
-                                        rule with
-                                        lastTriggered = ?Time.now()
-                                    };
-                                    rules.put(rule.id, updatedRule);
-                                };
-                            };
+        var executedRules = 0;
+        var errors = 0;
+        
+        for ((ruleId, rule) in rules.entries()) {
+            if (rule.enabled) {
+                var shouldProcess = true;
+                
+                // Check cooldown period
+                switch (rule.lastTriggered) {
+                    case (?lastTrigger) {
+                        let timeSinceLastTrigger = Time.now() - lastTrigger;
+                        if (timeSinceLastTrigger < rule.cooldownPeriod) {
+                            Debug.print("⏳ Rule " # ruleId # " in cooldown period");
+                            shouldProcess := false;
                         };
                     };
                     case null {};
                 };
+
+                if (shouldProcess) {
+                    Debug.print("📋 Checking rule: " # ruleId);
+                    
+                    // Get current metrics
+                    switch (metrics.get(rule.canisterId)) {
+                        case (?currentMetrics) {
+                            var shouldTrigger = false;
+                            
+                            // Check conditions
+                            switch (rule.condition) {
+                                case (#CyclesBelow(threshold)) {
+                                    if (currentMetrics.cycles < threshold) {
+                                        Debug.print("⚠️ Cycles below threshold: " # 
+                                            Nat.toText(currentMetrics.cycles) # " < " # 
+                                            Nat.toText(threshold));
+                                        shouldTrigger := true;
+                                    };
+                                };
+                                case (#MemoryUsageAbove(threshold)) {
+                                    if (currentMetrics.memorySize > threshold) {
+                                        Debug.print("⚠️ Memory usage above threshold");
+                                        shouldTrigger := true;
+                                    };
+                                };
+                                case (#ComputeAllocationAbove(threshold)) {
+                                    if (currentMetrics.computeAllocation > threshold) {
+                                        Debug.print("⚠️ Compute allocation above threshold");
+                                        shouldTrigger := true;
+                                    };
+                                };
+                            };
+
+                            if (shouldTrigger) {
+                                Debug.print("🎯 Rule triggered: " # ruleId);
+                                
+                                // Execute action
+                                switch (rule.action) {
+                                    case (#TopUpCycles(amount)) {
+                                        Debug.print("💰 Executing top-up action");
+                                        try {
+                                            let topUpResult = await performTopUp(rule.canisterId, amount);
+                                            switch (topUpResult) {
+                                                case (#ok(topUpAmount)) {
+                                                    Debug.print("✅ Top-up successful: " # Nat.toText(topUpAmount));
+                                                    executedRules += 1;
+                                                };
+                                                case (#err(error)) {
+                                                    Debug.print("❌ Top-up failed: " # error);
+                                                    errors += 1;
+                                                };
+                                            };
+                                        } catch (e) {
+                                            Debug.print("❌ Error executing top-up: " # Error.message(e));
+                                            errors += 1;
+                                        };
+                                    };
+                                    case (#NotifyOwner(message)) {
+                                        Debug.print("📧 Would send notification: " # message);
+                                        executedRules += 1;
+                                    };
+                                    case (#AdjustComputeAllocation(newAllocation)) {
+                                        Debug.print("⚙️ Would adjust compute allocation to: " # 
+                                            Nat.toText(newAllocation));
+                                        executedRules += 1;
+                                    };
+                                };
+
+                                // Update last triggered time
+                                let updatedRule : Rule = {
+                                    id = rule.id;
+                                    canisterId = rule.canisterId;
+                                    condition = rule.condition;
+                                    action = rule.action;
+                                    enabled = rule.enabled;
+                                    lastTriggered = ?Time.now();
+                                    cooldownPeriod = rule.cooldownPeriod;
+                                    owner = rule.owner;
+                                };
+                                rules.put(rule.id, updatedRule);
+                            };
+                        };
+                        case null {
+                            Debug.print("❌ No metrics found for canister: " # 
+                                Principal.toText(rule.canisterId));
+                        };
+                    };
+                };
+            } else {
+                Debug.print("⏭️ Skipping disabled rule: " # ruleId);
             };
         };
-        #ok(())
+
+        let resultMessage = "Executed " # Int.toText(executedRules) # 
+            " rules with " # Int.toText(errors) # " errors";
+        Debug.print("✅ Rule check complete: " # resultMessage);
+        #ok(resultMessage)
     };
 };

@@ -80,6 +80,9 @@ async function handleAuthenticated() {
             canisterId: canisterId,
         });
 
+        // Make actor globally accessible
+        window.actor = actor;
+
         // Display user's principal ID
         const principal = identity.getPrincipal();
         const principalElement = document.getElementById("principalId");
@@ -1059,7 +1062,9 @@ async function createRule(event) {
                 break;
         }
 
-        const cooldownNanos = BigInt(cooldownHours) * BigInt(3600000000000); // Convert hours to nanoseconds
+        const hoursInNanos = 3600000000000; // 1 hour in nanoseconds
+        const cooldownNanos = BigInt(Math.floor(Number(cooldownHours) * hoursInNanos));
+
         console.log("Creating rule with:", {
             canisterId,
             condition,
@@ -1167,35 +1172,241 @@ function startPeriodicMetricsUpdate() {
 function startPeriodicRuleCheck() {
     const ONE_HOUR = 60 * 60 * 1000; // 1 hour in milliseconds
     
-    async function checkRules() {
-        try {
-            if (!actor) {
-                console.warn("Actor not initialized yet");
-                return;
-            }
-
-            const result = await actor.checkAndExecuteRules();
-            if (result.err) {
-                console.error("Error checking rules:", result.err);
-            }
-            
-            // Refresh rules display
-            await loadRules();
-        } catch (error) {
-        console.error("Error in rule check:", error);
-        }
-    }
-    
-    // Clear any existing interval
     if (window.ruleCheckInterval) {
         clearInterval(window.ruleCheckInterval);
     }
     
-    // Set up periodic checks
     window.ruleCheckInterval = setInterval(checkRules, ONE_HOUR);
-    
-    // Run initial check
-    checkRules();
+    checkRules(); // Run initial check
 }
+
+// Enhanced rule checking with detailed feedback
+async function checkRules() {
+    console.group('🔄 Checking Rules');
+    try {
+        if (!actor) {
+            console.warn("Actor not initialized");
+            return;
+        }
+
+        console.log('📋 Initiating rule check...');
+        const result = await actor.checkAndExecuteRules();
+        
+        if ('ok' in result) {
+            console.log('✅ Rules checked successfully:', result.ok);
+            showRuleExecutionResults(result.ok);
+            await loadRules();
+            await refreshAllMetrics();
+        } else {
+            console.error('❌ Rule check failed:', result.err);
+            showError("Failed to check rules: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error('🚨 Error during rule check:', error);
+        showError("Error checking rules: " + error.message);
+    }
+    console.groupEnd();
+}
+
+// Function to show rule execution results
+function showRuleExecutionResults(message) {
+    const container = document.getElementById("rule-execution-status");
+    if (!container) {
+        console.warn("Rule execution status container not found");
+        return;
+    }
+
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'alert alert-info';
+    statusDiv.innerHTML = `
+        <h4>Rule Execution Results</h4>
+        <p>${message}</p>
+        <small>Last checked: ${new Date().toLocaleString()}</small>
+    `;
+
+    // Remove old status after 10 seconds
+    setTimeout(() => {
+        statusDiv.remove();
+    }, 10000);
+
+    container.prepend(statusDiv);
+}
+
+// Function to show errors
+function showError(message) {
+    const container = document.getElementById("error-container");
+    if (!container) {
+        console.error("Error container not found");
+        return;
+    }
+
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'alert alert-danger';
+    errorDiv.innerHTML = `
+        <strong>Error:</strong> ${message}
+        <button type="button" class="close" onclick="this.parentElement.remove()">
+            <span>&times;</span>
+        </button>
+    `;
+
+    container.prepend(errorDiv);
+}
+
+// Function to refresh all metrics
+async function refreshAllMetrics() {
+    console.group('🔄 Refreshing All Metrics');
+    try {
+        const result = await actor.listUserCanisters();
+        if (result.ok) {
+            console.log('📋 Refreshing metrics for', result.ok.length, 'canisters');
+            for (const [canisterId] of result.ok) {
+                await fetchCanisterMetrics(canisterId.toString());
+            }
+            console.log('✅ All metrics refreshed successfully');
+        }
+    } catch (error) {
+        console.error('❌ Error refreshing metrics:', error);
+    }
+    console.groupEnd();
+}
+
+// Enhance the rule creation form
+document.getElementById('create-rule-form').onsubmit = async function(event) {
+    event.preventDefault();
+    console.group('📝 Creating New Rule');
+
+    try {
+        const canisterId = document.getElementById("rule-canister").value;
+        const conditionType = document.getElementById("rule-condition-type").value;
+        const conditionValue = document.getElementById("rule-condition-value").value;
+        const actionType = document.getElementById("rule-action-type").value;
+        const actionValue = document.getElementById("rule-action-value").value;
+        const cooldownHours = document.getElementById("rule-cooldown").value;
+
+        console.log('Form Data:', {
+            canisterId,
+            conditionType,
+            conditionValue,
+            actionType,
+            actionValue,
+            cooldownHours
+        });
+
+        // Validate inputs
+        if (!canisterId || !conditionValue || !actionValue || !cooldownHours) {
+            throw new Error("Please fill in all required fields");
+        }
+
+        let condition;
+        switch (conditionType) {
+            case "cycles":
+                condition = { CyclesBelow: BigInt(conditionValue) };
+                break;
+            case "memory":
+                condition = { MemoryUsageAbove: BigInt(conditionValue) };
+                break;
+            case "compute":
+                condition = { ComputeAllocationAbove: Number(conditionValue) };
+                break;
+            default:
+                throw new Error("Invalid condition type");
+        }
+
+        let action;
+        switch (actionType) {
+            case "topup":
+                action = { TopUpCycles: BigInt(actionValue) };
+                break;
+            case "notify":
+                action = { NotifyOwner: actionValue.toString() };
+                break;
+            case "compute":
+                action = { AdjustComputeAllocation: Number(actionValue) };
+                break;
+            default:
+                throw new Error("Invalid action type");
+        }
+
+        const hoursInNanos = 3600000000000; // 1 hour in nanoseconds
+        const cooldownNanos = BigInt(Math.floor(Number(cooldownHours) * hoursInNanos));
+        
+        console.log('Creating rule with processed data:', {
+            canisterId,
+            condition,
+            action,
+            cooldownNanos
+        });
+
+        const result = await actor.createRule(
+            Principal.fromText(canisterId),
+            condition,
+            action,
+            cooldownNanos
+        );
+
+        if (result.ok) {
+            console.log('✅ Rule created successfully:', result.ok);
+            showSuccess("Rule created successfully!");
+            this.reset();
+            await loadRules();
+        } else {
+            console.error('❌ Failed to create rule:', result.err);
+            showError("Failed to create rule: " + JSON.stringify(result.err));
+        }
+    } catch (error) {
+        console.error('🚨 Error creating rule:', error);
+        showError(error.message);
+    }
+    console.groupEnd();
+};
+
+// Function to show success messages
+function showSuccess(message) {
+    const container = document.getElementById("success-container");
+    if (!container) {
+        console.warn("Success container not found");
+        return;
+    }
+
+    const successDiv = document.createElement('div');
+    successDiv.className = 'alert alert-success';
+    successDiv.innerHTML = `
+        <strong>Success!</strong> ${message}
+        <button type="button" class="close" onclick="this.parentElement.remove()">
+            <span>&times;</span>
+        </button>
+    `;
+
+    container.prepend(successDiv);
+    
+    // Remove success message after 5 seconds
+    setTimeout(() => {
+        successDiv.remove();
+    }, 5000);
+}
+
+// Make new functions available globally
+window.checkRules = checkRules;
+window.refreshAllMetrics = refreshAllMetrics;
+window.startPeriodicRuleCheck = startPeriodicRuleCheck;
+
+async function displayCanisterMetrics(canisterId) {
+    try {
+      const metrics = await window.actor.getCanisterMetrics(canisterId);
+      console.log('Current Canister Metrics:', {
+        cycles: Number(metrics.cycles),
+        memorySize: Number(metrics.memorySize),
+        heapMemorySize: Number(metrics.heapMemorySize),
+        computeAllocation: Number(metrics.computeAllocation)
+      });
+    } catch (error) {
+      console.error('Error fetching metrics:', error);
+    }
+  }
+  
+  // Add to window for console access
+  window.displayCanisterMetrics = displayCanisterMetrics;
+  
+
 
 init();
